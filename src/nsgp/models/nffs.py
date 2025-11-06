@@ -161,15 +161,18 @@ class NFFs:
         sin_basis = torch.sin(omega_x)  # (n, M)
 
         # Step 6: Combine to get GP samples
+        # Z(x) = Re(∑ exp(iωx)·ξ) = ∑[cos(ωx)·ξ^R - sin(ωx)·ξ^I]
         Z = torch.zeros(n_samples, n)
         for i in range(n_samples):
             # Real part contribution
             Z[i] = torch.sum(xi_transformed[i, :, 0:1].T * cos_basis, dim=1)
-            # Imaginary part contribution
-            Z[i] += torch.sum(xi_transformed[i, :, 1:2].T * sin_basis, dim=1)
+            # Imaginary part contribution (note the MINUS sign!)
+            Z[i] -= torch.sum(xi_transformed[i, :, 1:2].T * sin_basis, dim=1)
 
-        # Normalize by volume element
+        # Normalize by volume element and Fourier transform convention
+        # The 1/(2π)^d factor comes from the inverse Fourier transform
         volume = (2 * self.omega_max) ** self.input_dim / M
-        Z = Z * np.sqrt(volume)
+        fourier_norm = (2 * np.pi) ** self.input_dim
+        Z = Z * np.sqrt(volume / fourier_norm)
 
         return Z
