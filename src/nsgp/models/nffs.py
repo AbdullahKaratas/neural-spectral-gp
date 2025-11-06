@@ -104,10 +104,23 @@ class NFFs:
         torch.Tensor, shape (M, M)
             Lower triangular Cholesky factor L where S = LL^T
         """
-        # Add small regularization for numerical stability
-        S_reg = S + 1e-6 * torch.eye(S.shape[0])
-        L = torch.linalg.cholesky(S_reg)
-        return L
+        # Add regularization for numerical stability and positive definiteness
+        # Adaptive jitter based on matrix norm
+        jitter = max(1e-6, 0.01 * torch.mean(torch.diag(S)).item())
+        S_reg = S + jitter * torch.eye(S.shape[0])
+
+        # Try Cholesky with increasing jitter if needed
+        max_attempts = 5
+        for attempt in range(max_attempts):
+            try:
+                L = torch.linalg.cholesky(S_reg)
+                return L
+            except RuntimeError:
+                if attempt < max_attempts - 1:
+                    jitter *= 10
+                    S_reg = S + jitter * torch.eye(S.shape[0])
+                else:
+                    raise
 
     def simulate(
         self,
