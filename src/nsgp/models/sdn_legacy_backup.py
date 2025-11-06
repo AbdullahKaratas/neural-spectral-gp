@@ -3,21 +3,6 @@ Spectral Density Network (SDN)
 
 Learns the spectral density s(ω, ω') of a nonstationary Gaussian process
 from observed data using a neural network with positive definiteness constraints.
-
-IMPORTANT: This is the baseline implementation. For production use, prefer
-FactorizedSpectralDensityNetwork (sdn_factorized.py) which:
-  ✓ Guarantees positive definiteness by construction
-  ✓ Achieves better accuracy (46% vs 111% error)
-  ✓ Enables reliable sampling (no Cholesky failures)
-
-This class is kept for:
-  - Baseline comparisons in experiments
-  - Understanding the evolution of the method
-  - Backward compatibility with old experiments
-
-Recommended usage:
-  from nsgp.models.sdn_factorized import FactorizedSpectralDensityNetwork
-  sdn = FactorizedSpectralDensityNetwork(...)
 """
 
 import torch
@@ -148,20 +133,12 @@ class SpectralDensityNetwork(nn.Module):
                 return self.forward(omega1, omega2)
         return spectral_density_fn
 
-    # ==================== DEPRECATED METHODS ====================
-    # These methods are kept for backward compatibility but should not be used.
-    # Use compute_covariance_deterministic() and posterior_mean_loss() instead.
-
     def compute_covariance(
         self,
         X: torch.Tensor,
         noise_var: float = 1e-4
     ) -> torch.Tensor:
         """
-        [DEPRECATED] Use compute_covariance_deterministic() instead.
-
-        This sampling-based approach has high gradient noise.
-
         Compute covariance matrix K using learned spectral density via NFFs.
 
         This uses the spectral representation to compute:
@@ -285,10 +262,6 @@ class SpectralDensityNetwork(nn.Module):
         noise_var: float = 1e-4
     ) -> torch.Tensor:
         """
-        [DEPRECATED] Use posterior_mean_loss() instead.
-
-        This method uses sampling-based covariance (high gradient noise).
-
         Compute negative log-likelihood of observations.
 
         NLL = -log p(y | X, θ) = 1/2 (y^T K^{-1} y + log|K| + n log(2π))
@@ -404,9 +377,6 @@ class SpectralDensityNetwork(nn.Module):
         n_samples: int = 100
     ) -> torch.Tensor:
         """
-        [DEPRECATED] This experimental loss did not perform well (~2000% error).
-        Use posterior_mean_loss() instead.
-
         Alternative loss: Spectral Moment Matching.
 
         Instead of computing full likelihood, match statistical moments:
@@ -492,8 +462,6 @@ class SpectralDensityNetwork(nn.Module):
 
     def low_rank_penalty(self) -> torch.Tensor:
         """
-        [DEPRECATED] Not needed with factorized SDN (which has explicit rank control).
-
         Regularization: Encourage low-rank spectral matrix.
 
         This promotes parsimony by favoring spectral densities that can
