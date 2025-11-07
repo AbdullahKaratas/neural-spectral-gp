@@ -150,11 +150,25 @@ Must compare against:
   - Formal proof: s(ω,ω') = f(ω)ᵀf(ω') ⟹ PSD
   - Conditions on f for PD (not just PSD)
 
-- [ ] **Sample complexity**
+- [ ] **Sample complexity analysis** (detailed)
   - How many observations n needed for ε-accurate s(ω,ω')?
-  - Connection to PAC-learning bounds?
+  - Derive explicit bounds: n = O(f(ε, M, r, d))
+  - Connection to PAC-learning bounds
+  - Comparison with standard GP sample complexity
 
-**Deliverable**: Theory section (2-3 pages) with proofs in appendix
+- [ ] **Convergence guarantees**
+  - Does s_learned → s_true as n → ∞?
+  - Rate of convergence analysis
+  - What assumptions are needed? (smoothness, bounded domain, etc.)
+  - Empirical validation: plot error vs n
+
+- [ ] **PAC-learning connection** (optional, high impact!)
+  - Frame spectral density learning as PAC problem
+  - Compute VC dimension or Rademacher complexity
+  - Derive generalization bounds
+  - This would be novel theoretical contribution!
+
+**Deliverable**: Theory section (2-3 pages) with proofs in appendix + convergence plots
 
 ### 3.2 Identifiability Analysis
 - [ ] **Multiple spectral densities can explain same data**
@@ -343,7 +357,19 @@ May 2026 (2 weeks):   Final polish & submit
 - ✅ Comprehensive ablation studies
 - ✅ Tight approximation bounds
 - ✅ Sample complexity analysis
+- ✅ Convergence guarantees (empirical + theoretical)
 - ✅ Code released & reproducible
+
+### Outstanding Paper (spotlight/oral potential):
+- ✅ All of above +
+- ✅ 3+ real-world datasets with diverse characteristics
+- ✅ 5+ comprehensive baselines (including recent methods)
+- ✅ PAC-learning bounds (novel theoretical contribution!)
+- ✅ Convergence rate analysis with tight constants
+- ✅ Works reliably in high dimensions (d≥3)
+- ✅ Extensive appendix with all proofs
+- ✅ Released code with tutorials and documentation
+- ✅ Demonstration video or interactive demo
 
 ---
 
