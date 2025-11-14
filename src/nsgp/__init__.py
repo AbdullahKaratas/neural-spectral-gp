@@ -9,10 +9,10 @@ Authors: Abdullah Karatas, Arsalan Jawaid
 
 __version__ = "0.1.0"
 
-from .models.sdn import SpectralDensityNetwork
+from .models.sdn_factorized import FactorizedSpectralDensityNetwork
 from .models.nffs import NFFs
 
 __all__ = [
-    "SpectralDensityNetwork",
+    "FactorizedSpectralDensityNetwork",
     "NFFs",
 ]
