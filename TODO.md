@@ -206,6 +206,76 @@ Remes 2017 & 38\% & 145\% & 165\% & ✗ (fails) & ✗ (3/10) \\
 
 ---
 
+# ⚡ WEEK 1.5-2: COMPUTATIONAL OPTIMIZATION (CRITICAL FOR SCALING)
+
+## Priority 1D: Exploit Low-Rank Structure During Training 🚀 CRITICAL
+
+**Why Critical:** Real-world datasets (Mauna Loa: n~800) will be too slow without this!
+
+**Current Problem:**
+- Training: O(n²M² + n³) - builds full K matrix
+- Doesn't exploit low-rank structure K = 2LL^T where L is n × 2r
+
+**The Solution: Woodbury Identity**
+
+Covariance has low-rank representation:
+```
+k(x,x') = 2 L_x^T L_{x'}  where L_x ∈ ℝ^(2r)
+K = 2LL^T  where L is n × 2r (not n × n!)
+```
+
+Use Woodbury to invert (2LL^T + σ²I) efficiently:
+```
+(2LL^T + σ²I)^(-1) = (1/σ²)[I - 2L(σ²I + 2L^TL)^(-1)L^T]
+```
+
+Only invert (2r) × (2r) matrix instead of n × n!
+
+**Complexity Improvement:**
+
+| Operation | Current | Woodbury | Speedup (n=1000, r=15) |
+|-----------|---------|----------|------------------------|
+| Per epoch | O(n²M²+n³) | O(nMr+nr²) | ~100-1000× |
+
+**Implementation Tasks:**
+
+```python
+# File: src/nsgp/models/sdn_factorized_lowrank.py
+
+def compute_lowrank_features(self, X, omega_grid, weights):
+    """
+    Build L: n × 2r feature matrix
+    L_i = [Re[φ(x_i)], Im[φ(x_i)]]
+    """
+    # O(nMr) - much faster than O(n²M²)
+    pass
+
+def log_marginal_likelihood_woodbury(self, L, y, sigma2):
+    """
+    Use Woodbury for GP marginal likelihood
+    PyTorch autodiff handles gradients automatically!
+    """
+    # M = σ²I + 2L^TL  (only 2r × 2r!)
+    # Solve and log-det using Woodbury
+    pass
+```
+
+**Action Items:**
+- [ ] Implement `compute_lowrank_features()` (1 day)
+- [ ] Implement `log_marginal_likelihood_woodbury()` with PyTorch autodiff (1 day)
+- [ ] Test numerical equivalence with naive implementation (1 day)
+- [ ] Benchmark speedup on n=100,500,1000 (1 day)
+- [ ] Update all training scripts to use low-rank version (1 day)
+
+**Expected Results:**
+- 100-1000× training speedup
+- Can handle n=10,000+ observations
+- Enables real-world experiments (Mauna Loa n~800)
+
+**Timeline:** Week 1.5 (after baselines start, before Mauna Loa)
+
+---
+
 # 🌍 WEEK 2-3: REAL-WORLD DATA (CRITICAL)
 
 ## Priority 2A: Mauna Loa CO₂ Dataset 🌡️ CRITICAL
