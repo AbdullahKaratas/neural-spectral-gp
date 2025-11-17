@@ -139,6 +139,97 @@ class FactorizedSpectralDensityNetwork(nn.Module):
 
         return s
 
+    def compute_lowrank_features(
+        self,
+        X: torch.Tensor,
+        omega_grid: torch.Tensor,
+        weights: torch.Tensor
+    ) -> torch.Tensor:
+        """
+        Compute low-rank feature matrix L: n x 2r for training with Woodbury entity
+
+        Uses the factorized representation:
+            L_x = [Re[\phi(x)], Im[\phi(x)]]
+        where:
+            \phi(x) = \alpha(x) F,
+            [\alpha(x)]_k = exp(i\omega_k x)
+            [\alpha(x)]_k = 1/2, for \omega_k = 0
+
+        This allows K = 2LL^T representation
+
+        Parameters
+        ----------
+        X : torch.Tensor, shape (n, d)
+            Spatial locations
+        omega_grid : torch.Tensor, shape (r, d)
+            Frequency grid points
+
+        Returns
+        -------
+        L : torch.Tensor, shape (n, 2r)
+            Low-rank feature matrix
+        """
+
+        # TODO: implement the low rank feature
+        return torch.tensor([0])
+
+    def log_marginal_likelihood_woodbury(
+        self,
+        L: torch.Tensor,
+        y: torch.Tensor,
+        sigma2: float
+    ) -> torch.Tensor:
+        """
+        Compute GP marginal likelihood using Woodbury identity.
+
+        Given K = 2LL^T + \sigma^2 I, use Woodbury formula:
+            (2LL^T + \sigma^2 I)^(-1) = (1/\sigma^2)[I - 2L(\sigma^2 I + 2L^TL)^(-1)L^T]
+
+        Parameters
+        ----------
+        L : torch.Tensor, shape (n, 2r)
+            Low-rank feature matrix
+        y : torch.Tensor, shape (n,)
+            Centered observations
+        sigma2 : float
+            Noise variance
+
+        Returns
+        -------
+        nll : torch.Tensor
+            Negative log marginal likelihood
+        """
+        n = L.shape[0]
+        r2 = L.shape[1]  # 2r
+
+        # Woodbury formula
+        W = sigma2 * torch.eye(r2, device=L.device, dtype=L.dtype) + 2 * (L.T @ L)
+        Lw = torch.linalg.cholesky(W)
+
+        # Solve (2LL^T + σ²I)^(-1) y using Woodbury formula
+        # α = (1/σ²)[y - 2L W^(-1) L^T y]
+        LT_y = L.T @ y  # (2r,)
+        W_inv_LT_y = torch.cholesky_solve(LT_y.unsqueeze(-1), Lw).squeeze() # stable solve
+        alpha = (1/sigma2) * (y - 2 * (L @ W_inv_LT_y))  # (n,)
+
+        # Data fit term: y^T α
+        data_fit = torch.dot(y, alpha)
+
+        # Log determinant using Sylvester's determinant identity:
+        # |2LL^T + σ²I| = |σ²I| · |2I_r| · |(2I_r)^{-1} + L^T(σ²I)^{-1}L|
+        #               = (σ²)^n · 2^r · (2σ²)^{-r} · |σ²I_r + 2L^TL|
+        #               = (σ²)^{n-r} · |W|
+        # where W = σ²I_r + 2L^TL
+        # Therefore: log|2LL^T + σ²I| = (n-r)·log(σ²) + log|W|
+        log_det_sigma = (n - r2) * torch.log(torch.tensor(sigma2, device=L.device, dtype=L.dtype))
+        log_det_W = 2 * torch.sum(torch.log(torch.diag(Lw)))  # log|W| = 2·sum(log(diag(Lw)))
+        log_det = log_det_sigma + log_det_W
+
+        # ~ negative log marginal likelihood / const. and scaling removed
+        nll = data_fit + log_det
+
+        return nll
+
     def compute_covariance_mc(
         self,
         X1: torch.Tensor,
@@ -531,13 +622,19 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         for epoch in range(epochs):
             optimizer.zero_grad()
 
-            # Posterior mean loss - HYBRID approach!
-            data_loss = self.posterior_mean_loss(
-                X_train, y_train,
-                noise_var=noise_var,
-                use_mc=use_mc_training,
-                mc_samples=mc_samples
-            )
+            # Posterior mean loss - Woodbury by default!
+            if use_woodbury:
+                data_loss = self.posterior_mean_loss_woodbury(
+                    X_train, y_train,
+                    noise_var=noise_var
+                )
+            else:
+                # Fallback to naive deterministic (for testing)
+                data_loss = self.posterior_mean_loss(
+                    X_train, y_train,
+                    noise_var=noise_var,
+                    use_mc=False
+                )
 
             # Smoothness regularization
             smooth_penalty = self.spectral_smoothness_penalty()
