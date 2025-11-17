@@ -143,12 +143,10 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         self,
         X: torch.Tensor,
         omega_grid: torch.Tensor,
-        weights: torch.Tensor
     ) -> torch.Tensor:
         """
-        Compute low-rank feature matrix L: n x 2r for training with Woodbury entity
-
-        Uses the factorized representation:
+        Compute low-rank feature matrix L: n x 2*rank
+        Uses the factorized representation
             L_x = [Re[\phi(x)], Im[\phi(x)]]
         where:
             \phi(x) = \alpha(x) F,
@@ -161,17 +159,54 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         ----------
         X : torch.Tensor, shape (n, d)
             Spatial locations
-        omega_grid : torch.Tensor, shape (r, d)
+        omega_grid : torch.Tensor, shape (num_freqs, d)
             Frequency grid points
 
         Returns
         -------
-        L : torch.Tensor, shape (n, 2r)
+        L : torch.Tensor, shape (n, 2*self.rank)
             Low-rank feature matrix
         """
+        # Compute phases: \omega_k \cdot x for all locations and frequencies
+        # X: (n, d), omega_grid: (num_freqs, d) -> phases: (n, num_freqs)
+        phases = X @ omega_grid.T  # (n, num_freqs)
 
-        # TODO: implement the low rank feature
-        return torch.tensor([0])
+        # Compute complex exponentials: \alpha(x)_k = exp(i\omega_k·x)
+        cos_phases = torch.cos(phases)  # Re[\alpha (x)] (n, num_freqs)
+        sin_phases = torch.sin(phases)  # Im[\alpha (x)] (n, num_freqs)
+
+        # Handle zero frequencies: set \alpha_k(x) = 1/2 for \omega_k = 0
+        omega_norms = torch.norm(omega_grid, dim=1)  # (num_freqs,)
+        is_zero = omega_norms < 1e-10
+        if torch.any(is_zero):
+            cos_phases[:, is_zero] = 0.5
+            sin_phases[:, is_zero] = 0.0
+
+        # Compute neural network features for each frequency
+        # F: (num_freqs, rank) where F[k, j] = f_j(\omega_k)
+        F = self.compute_features(omega_grid)  # (num_freqs, rank)
+
+        # Handle complex F by separating real and imaginary parts
+        if torch.is_complex(F):
+            F_real = F.real
+            F_imag = F.imag
+        else:
+            # Currently F is real-valued from the MLP
+            F_real = F
+            F_imag = torch.zeros_like(F)
+
+        # Compute \phi(x) = \alpha(x) F where \alpha(x) are complex exponentials
+        # Complex multiplication: (cos + i·sin) (F_real + i·F_imag)
+        # Real part: Re[\phi(x)] = \sum_k [cos(\omega_k x)F_real_k - sin(\omega_k x)F_imag_k]
+        phi_real = cos_phases @ F_real - sin_phases @ F_imag  # (n, rank)
+
+        # Imaginary part: Im[\phi(x)] = \sum_k [sin(\omega_k x)F_real_k + cos(\omega_k x)F_imag_k]
+        phi_imag = sin_phases @ F_real + cos_phases @ F_imag  # (n, rank)
+
+        # Combine real and imaginary parts: L = [Re[\phi(x)], Im[\phi(x)]]
+        L = torch.cat([phi_real, phi_imag], dim=1)  # (n, 2*rank)
+
+        return L
 
     def log_marginal_likelihood_woodbury(
         self,
@@ -622,19 +657,13 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         for epoch in range(epochs):
             optimizer.zero_grad()
 
-            # Posterior mean loss - Woodbury by default!
-            if use_woodbury:
-                data_loss = self.posterior_mean_loss_woodbury(
-                    X_train, y_train,
-                    noise_var=noise_var
-                )
-            else:
-                # Fallback to naive deterministic (for testing)
-                data_loss = self.posterior_mean_loss(
-                    X_train, y_train,
-                    noise_var=noise_var,
-                    use_mc=False
-                )
+            # Posterior mean loss - HYBRID approach!
+            data_loss = self.posterior_mean_loss(
+                X_train, y_train,
+                noise_var=noise_var,
+                use_mc=use_mc_training,
+                mc_samples=mc_samples
+            )
 
             # Smoothness regularization
             smooth_penalty = self.spectral_smoothness_penalty()
