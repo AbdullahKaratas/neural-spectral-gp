@@ -147,11 +147,11 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         """
         Compute low-rank feature matrix L: n x 2*rank
         Uses the factorized representation
-            L_x = [Re[\phi(x)], Im[\phi(x)]]
+            L_x = [Re[phi(x)], Im[phi(x)]]
         where:
-            \phi(x) = \alpha(x) F,
-            [\alpha(x)]_k = exp(i\omega_k x)
-            [\alpha(x)]_k = 1/2, for \omega_k = 0
+            phi(x) = alpha(x) F,
+            [alpha(x)]_k = exp(iomega_k x)
+            [alpha(x)]_k = 1/2, for omega_k = 0
 
         This allows K = 2LL^T representation
 
@@ -167,15 +167,15 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         L : torch.Tensor, shape (n, 2*self.rank)
             Low-rank feature matrix
         """
-        # Compute phases: \omega_k \cdot x for all locations and frequencies
+        # Compute phases: omega_k \cdot x for all locations and frequencies
         # X: (n, d), omega_grid: (num_freqs, d) -> phases: (n, num_freqs)
         phases = X @ omega_grid.T  # (n, num_freqs)
 
-        # Compute complex exponentials: \alpha(x)_k = exp(i\omega_k·x)
-        cos_phases = torch.cos(phases)  # Re[\alpha (x)] (n, num_freqs)
-        sin_phases = torch.sin(phases)  # Im[\alpha (x)] (n, num_freqs)
+        # Compute complex exponentials: alpha(x)_k = exp(iomega_k·x)
+        cos_phases = torch.cos(phases)  # Re[alpha (x)] (n, num_freqs)
+        sin_phases = torch.sin(phases)  # Im[alpha (x)] (n, num_freqs)
 
-        # Handle zero frequencies: set \alpha_k(x) = 1/2 for \omega_k = 0
+        # Handle zero frequencies: set alpha_k(x) = 1/2 for omega_k = 0
         omega_norms = torch.norm(omega_grid, dim=1)  # (num_freqs,)
         is_zero = omega_norms < 1e-10
         if torch.any(is_zero):
@@ -183,8 +183,10 @@ class FactorizedSpectralDensityNetwork(nn.Module):
             sin_phases[:, is_zero] = 0.0
 
         # Compute neural network features for each frequency
-        # F: (num_freqs, rank) where F[k, j] = f_j(\omega_k)
+        # F: (num_freqs, rank) where F[k, j] = f_j(omega_k)
         F = self.compute_features(omega_grid)  # (num_freqs, rank)
+        num_freqs = omega_grid.shape[0]
+        F *= self.omega_max / num_freqs
 
         # Handle complex F by separating real and imaginary parts
         if torch.is_complex(F):
@@ -195,15 +197,15 @@ class FactorizedSpectralDensityNetwork(nn.Module):
             F_real = F
             F_imag = torch.zeros_like(F)
 
-        # Compute \phi(x) = \alpha(x) F where \alpha(x) are complex exponentials
+        # Compute phi(x) = alpha(x) F where alpha(x) are complex exponentials
         # Complex multiplication: (cos + i·sin) (F_real + i·F_imag)
-        # Real part: Re[\phi(x)] = \sum_k [cos(\omega_k x)F_real_k - sin(\omega_k x)F_imag_k]
+        # Real part: Re[phi(x)] = \sum_k [cos(omega_k x)F_real_k - sin(omega_k x)F_imag_k]
         phi_real = cos_phases @ F_real - sin_phases @ F_imag  # (n, rank)
 
-        # Imaginary part: Im[\phi(x)] = \sum_k [sin(\omega_k x)F_real_k + cos(\omega_k x)F_imag_k]
+        # Imaginary part: Im[phi(x)] = \sum_k [sin(omega_k x)F_real_k + cos(omega_k x)F_imag_k]
         phi_imag = sin_phases @ F_real + cos_phases @ F_imag  # (n, rank)
 
-        # Combine real and imaginary parts: L = [Re[\phi(x)], Im[\phi(x)]]
+        # Combine real and imaginary parts: L = [Re[phi(x)], Im[phi(x)]]
         L = torch.cat([phi_real, phi_imag], dim=1)  # (n, 2*rank)
 
         return L
@@ -237,9 +239,25 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         n = L.shape[0]
         r2 = L.shape[1]  # 2r
 
-        # Woodbury formula
-        W = sigma2 * torch.eye(r2, device=L.device, dtype=L.dtype) + 2 * (L.T @ L)
-        Lw = torch.linalg.cholesky(W)
+        # Woodbury formula with numerical stability
+        # Add regularization for numerical stability
+        jitter = 1e-5
+        max_attempts = 4
+
+        for attempt in range(max_attempts):
+            W = sigma2 * torch.eye(r2, device=L.device, dtype=L.dtype) + 2 * (L.T @ L)
+            W = W + jitter * torch.eye(r2, device=L.device, dtype=L.dtype)
+
+            try:
+                Lw = torch.linalg.cholesky(W)
+                break
+            except RuntimeError:
+                if attempt == max_attempts - 1:
+                    raise RuntimeError(
+                        f"Woodbury Cholesky failed after {max_attempts} attempts. "
+                        f"Matrix W might not be positive-definite. Try increasing noise_var."
+                    )
+                jitter *= 10
 
         # Solve (2LL^T + σ²I)^(-1) y using Woodbury formula
         # α = (1/σ²)[y - 2L W^(-1) L^T y]
