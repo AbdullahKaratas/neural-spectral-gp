@@ -15,6 +15,7 @@ import torch.nn as nn
 import numpy as np
 from typing import Optional, List, Tuple
 from .nffs import NFFs
+import math
 
 
 class FactorizedSpectralDensityNetwork(nn.Module):
@@ -144,69 +145,69 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         X: torch.Tensor,
         omega_grid: torch.Tensor,
     ) -> torch.Tensor:
-        """
-        Compute low-rank feature matrix L: n x 2*rank
-        Uses the factorized representation
-            L_x = [Re[phi(x)], Im[phi(x)]]
-        where:
-            phi(x) = alpha(x) F,
-            [alpha(x)]_k = exp(iomega_k x)
-            [alpha(x)]_k = 1/2, for omega_k = 0
+        r"""
+        Compute low-rank feature matrix L using spectral density matrix decomposition.
 
-        This allows K = 2LL^T representation
+        This computes K = LL^T where K ≈ B S^{1/2} (S^{1/2})^T B^T
+        - B[i,m] = cos(omega_m x_i) is the cosine basis
+        - S[m,n] = s(omega_m, omega_n) \Delta omega^2 is the spectral density matrix with quadrature weights
+        - S^{1/2} is the Cholesky decomposition of S
 
         Parameters
         ----------
         X : torch.Tensor, shape (n, d)
             Spatial locations
         omega_grid : torch.Tensor, shape (num_freqs, d)
-            Frequency grid points
+            Frequency grid points (should start from 0 for real spectral density)
 
         Returns
         -------
-        L : torch.Tensor, shape (n, 2*self.rank)
-            Low-rank feature matrix
+        L : torch.Tensor, shape (n, num_freqs)
+            Low-rank feature matrix where K = LL^T
         """
-        # Compute phases: omega_k \cdot x for all locations and frequencies
+        num_freqs = omega_grid.shape[0]
+
+        # Compute frequency spacing for quadrature weights
+        if num_freqs > 1:
+            spacing = torch.norm(omega_grid[1] - omega_grid[0])
+        else:
+            spacing = 1.0
+
+        # Compute spectral density matrix S[m,n] = s(omega_m, omega_n)
+        # Using the learned factorized representation: s(omega,omega') = f(omega)^T f(omega')
+        f_omega = self.compute_features(omega_grid)  # (num_freqs, rank)
+        S = f_omega @ f_omega.T  # (num_freqs, num_freqs)
+
+        # Apply quadrature weight scaling
+        S = S * (spacing ** 2)
+
+        # Add small jitter for numerical stability
+        jitter = 1e-6
+        S = S + jitter * torch.eye(num_freqs, device=S.device, dtype=S.dtype)
+
+        # Compute matrix square root via Cholesky: S = LL^T => S^{1/2} = L
+        try:
+            S_sqrt = torch.linalg.cholesky(S)  # (num_freqs, num_freqs)
+        except RuntimeError:
+            # Fallback: use eigendecomposition
+            eigenvalues, eigenvectors = torch.linalg.eigh(S)
+            eigenvalues = torch.clamp(eigenvalues, min=0)
+            S_sqrt = eigenvectors @ torch.diag(torch.sqrt(eigenvalues)) @ eigenvectors.T
+
+        # Compute cosine basis: B[i,m] = cos(ω_m · x_i)
         # X: (n, d), omega_grid: (num_freqs, d) -> phases: (n, num_freqs)
         phases = X @ omega_grid.T  # (n, num_freqs)
+        B = torch.cos(phases)  # (n, num_freqs)
 
-        # Compute complex exponentials: alpha(x)_k = exp(iomega_k·x)
-        cos_phases = torch.cos(phases)  # Re[alpha (x)] (n, num_freqs)
-        sin_phases = torch.sin(phases)  # Im[alpha (x)] (n, num_freqs)
-
-        # Handle zero frequencies: set alpha_k(x) = 1/2 for omega_k = 0
+        # Correction for zero-th element (ω = 0)
         omega_norms = torch.norm(omega_grid, dim=1)  # (num_freqs,)
         is_zero = omega_norms < 1e-10
         if torch.any(is_zero):
-            cos_phases[:, is_zero] = 0.5
-            sin_phases[:, is_zero] = 0.0
+            B[:, is_zero] *= 0.5
 
-        # Compute neural network features for each frequency
-        # F: (num_freqs, rank) where F[k, j] = f_j(omega_k)
-        F = self.compute_features(omega_grid)  # (num_freqs, rank)
-        num_freqs = omega_grid.shape[0]
-        F *= self.omega_max / num_freqs
-
-        # Handle complex F by separating real and imaginary parts
-        if torch.is_complex(F):
-            F_real = F.real
-            F_imag = F.imag
-        else:
-            # Currently F is real-valued from the MLP
-            F_real = F
-            F_imag = torch.zeros_like(F)
-
-        # Compute phi(x) = alpha(x) F where alpha(x) are complex exponentials
-        # Complex multiplication: (cos + i·sin) (F_real + i·F_imag)
-        # Real part: Re[phi(x)] = \sum_k [cos(omega_k x)F_real_k - sin(omega_k x)F_imag_k]
-        phi_real = cos_phases @ F_real - sin_phases @ F_imag  # (n, rank)
-
-        # Imaginary part: Im[phi(x)] = \sum_k [sin(omega_k x)F_real_k + cos(omega_k x)F_imag_k]
-        phi_imag = sin_phases @ F_real + cos_phases @ F_imag  # (n, rank)
-
-        # Combine real and imaginary parts: L = [Re[phi(x)], Im[phi(x)]]
-        L = torch.cat([phi_real, phi_imag], dim=1)  # (n, 2*rank)
+        # Compute low-rank features: L = 2 * B @ S^{1/2}
+        # The factor of 2 accounts for the symmetry in the full Fourier transform
+        L = 2.0 * B @ S_sqrt  # (n, num_freqs)
 
         return L
 
@@ -216,15 +217,15 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         y: torch.Tensor,
         sigma2: float
     ) -> torch.Tensor:
-        """
+        r"""
         Compute GP marginal likelihood using Woodbury identity.
 
-        Given K = 2LL^T + \sigma^2 I, use Woodbury formula:
-            (2LL^T + \sigma^2 I)^(-1) = (1/\sigma^2)[I - 2L(\sigma^2 I + 2L^TL)^(-1)L^T]
+        Given K = LL^T + \sigma^2 I, use:
+            (LL^T + \sigma^2 I)^(-1) = (1/\sigma^2)[I - L(\sigma^2 I + L^TL)^(-1)L^T]
 
         Parameters
         ----------
-        L : torch.Tensor, shape (n, 2r)
+        L : torch.Tensor, shape (n, r)
             Low-rank feature matrix
         y : torch.Tensor, shape (n,)
             Centered observations
@@ -237,7 +238,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
             Negative log marginal likelihood
         """
         n = L.shape[0]
-        r2 = L.shape[1]  # 2r
+        r = L.shape[1]
 
         # Woodbury formula with numerical stability
         # Add regularization for numerical stability
@@ -245,8 +246,8 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         max_attempts = 4
 
         for attempt in range(max_attempts):
-            W = sigma2 * torch.eye(r2, device=L.device, dtype=L.dtype) + 2 * (L.T @ L)
-            W = W + jitter * torch.eye(r2, device=L.device, dtype=L.dtype)
+            W = sigma2 * torch.eye(r, device=L.device, dtype=L.dtype) + (L.T @ L)
+            W = W + jitter * torch.eye(r, device=L.device, dtype=L.dtype)
 
             try:
                 Lw = torch.linalg.cholesky(W)
@@ -259,26 +260,27 @@ class FactorizedSpectralDensityNetwork(nn.Module):
                     )
                 jitter *= 10
 
-        # Solve (2LL^T + σ²I)^(-1) y using Woodbury formula
-        # α = (1/σ²)[y - 2L W^(-1) L^T y]
-        LT_y = L.T @ y  # (2r,)
+        # Solve (LL^T + sigma^2 I)^(-1) y using Woodbury formula
+        # alpha = (1/sigma^2)[y - L W^(-1) L^T y]
+        LT_y = L.T @ y  # (r,)
         W_inv_LT_y = torch.cholesky_solve(LT_y.unsqueeze(-1), Lw).squeeze() # stable solve
-        alpha = (1/sigma2) * (y - 2 * (L @ W_inv_LT_y))  # (n,)
+        alpha = (1/sigma2) * (y - (L @ W_inv_LT_y))  # (n,)
 
-        # Data fit term: y^T α
+        # Data fit term: y^T alpha
         data_fit = torch.dot(y, alpha)
 
         # Log determinant using Sylvester's determinant identity:
-        # |2LL^T + σ²I| = |σ²I| · |2I_r| · |(2I_r)^{-1} + L^T(σ²I)^{-1}L|
-        #               = (σ²)^n · 2^r · (2σ²)^{-r} · |σ²I_r + 2L^TL|
-        #               = (σ²)^{n-r} · |W|
-        # where W = σ²I_r + 2L^TL
-        # Therefore: log|2LL^T + σ²I| = (n-r)·log(σ²) + log|W|
-        log_det_sigma = (n - r2) * torch.log(torch.tensor(sigma2, device=L.device, dtype=L.dtype))
+        # |LL^T + sigma^2 I| = |sigma^2 I| · |I_r + L^T(sigma^2 I)^{-1}L|
+        #               = (sigma^2)^n · |I_r + (1/sigma^2 )L^TL|
+        #               = (sigma^2)^n · (1/sigma^2)^r · |sigma^2 I_r + L^TL|
+        #               = (sigma^2)^{n-r} · |W|
+        # where W = sigma^2I_r + L^TL
+        # Therefore: log|LL^T + sigma^2I| = (n-r)·log(sigma^2) + log|W|
+        log_det_sigma = (n - r) * torch.log(torch.tensor(sigma2, device=L.device, dtype=L.dtype))
         log_det_W = 2 * torch.sum(torch.log(torch.diag(Lw)))  # log|W| = 2·sum(log(diag(Lw)))
         log_det = log_det_sigma + log_det_W
 
-        # ~ negative log marginal likelihood / const. and scaling removed
+        # ~ negative log marginal likelihood (const. and scaling removed)
         nll = data_fit + log_det
 
         return nll
@@ -521,12 +523,11 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         # Solve K⁻¹y
         alpha = torch.cholesky_solve(y_train.unsqueeze(-1), L).squeeze()
 
-        # Negative log marginal likelihood (GPML eq 2.30)
-        loss = 0.5 * (
-            y_train @ alpha +  # Data fit
-            2 * torch.sum(torch.log(torch.diag(L))) +  # Complexity
-            len(y_train) * np.log(2 * np.pi)
-        )
+        # ~ negative log marginal likelihood (const. and scaling removed)
+        data_fit = y_train @ alpha
+        log_det = 2 * torch.sum(torch.log(torch.diag(L)))
+
+        loss = data_fit + log_det
 
         return loss
 
