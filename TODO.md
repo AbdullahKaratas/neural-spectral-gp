@@ -206,6 +206,38 @@ Remes 2017 & 38\% & 145\% & 165\% & ✗ (fails) & ✗ (3/10) \\
 
 ---
 
+# 🔧 IMPLEMENTATION IMPROVEMENTS
+
+## TODO: Simplify Training
+
+**Current Problem:**
+- Training uses CosineAnnealingWarmRestarts scheduler + early stopping with model restoration and smoothness penalty
+- This approach can lead to poor kernel approximation despite achieving lower loss values
+
+**Issue:**
+- Scheduler causes learning rate to cycle, leading to instability
+- Early stopping restoration saves model with lowest marginal likelihood
+
+**Recommendation:**
+- Remove CosineAnnealingWarmRestarts scheduler (use plain Adam)
+- Remove early stopping restoration logic (use final epoch model)
+- Remove smoothness penalty (always enabled currently, adds computational cost with no clear benefit)
+- Keep patience for stopping, but don't restore "best" model
+
+**Evidence:**
+- With scheduler + restoration: 99.5% relative error, kernel range [-0.04, 0.04]
+- Without scheduler, no restoration: 65.7% relative error, kernel range [-0.17, 1.61]
+- Same configuration otherwise (lr=0.01, 2000 epochs, 50 freq points)
+
+**Action Items:**
+- [ ] Remove scheduler from fit() method
+- [ ] Remove or make optional the early stopping restoration
+- [ ] Remove or test smoothness penalty benefits
+- [ ] Test on all synthetic kernels to verify improvement
+- [ ] Update documentation to reflect simplified training approach
+
+---
+
 # ⚡ WEEK 1.5-2: COMPUTATIONAL OPTIMIZATION (CRITICAL FOR SCALING)
 
 ## Priority 1D: Exploit Low-Rank Structure During Training 🚀 CRITICAL
