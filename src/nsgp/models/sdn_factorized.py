@@ -414,7 +414,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
 
         Full bivariate spectral density via trapezoidal quadrature:
         K[i,j] = ∫∫ s(ω, ω') cos(ω·xᵢ - ω'·xⱼ) dω dω'
-               ≈ Σₘ Σₙ s(ωₘ, ωₙ) cos(ωₘ·xᵢ - ωₙ·xⱼ) Δω²/(2π)^d
+               ≈ Σₘ Σₙ s(ωₘ, ωₙ) cos(ωₘ·xᵢ - ωₙ·xⱼ) Δω²
 
         Parameters
         ----------
@@ -441,19 +441,17 @@ class FactorizedSpectralDensityNetwork(nn.Module):
             add_noise = False
 
         n1, n2 = X1.shape[0], X2.shape[0]
-        M = self.n_features
 
         # Frequency grid
-        omegas = torch.linspace(-self.omega_max/2, self.omega_max/2, M).unsqueeze(-1)
+        omegas = torch.linspace(-self.omega_max/2, self.omega_max/2, self.n_features).unsqueeze(-1)
 
         # FULL bivariate spectral density matrix s(ωₘ, ωₙ)
         f_all = self.compute_features(omegas)  # (M, r)
         S_full = f_all @ f_all.T  # (M, M) - s(ωₘ, ωₙ) via factorization!
 
         # Integration weights
-        dw = self.omega_max / (M - 1) if M > 1 else self.omega_max
-        volume = dw * dw  # 2D integration!
-        fourier_norm = (2 * np.pi) ** self.input_dim
+        dw = self.omega_max / self.n_features if self.n_features > 1 else self.omega_max
+        volume = dw * dw
 
         # Pre-compute ω @ X matrices
         omega_X1 = (omegas @ X1.T).squeeze()  # (M, n1)
@@ -474,7 +472,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
                 K_row.append(k_ij)
             K_rows.append(torch.stack(K_row))
 
-        K = torch.stack(K_rows) * volume / fourier_norm  # (n1, n2) - differentiable!
+        K = torch.stack(K_rows) * volume  # (n1, n2) - differentiable!
 
         if add_noise:
             K = (K + K.T) / 2.0
