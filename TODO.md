@@ -271,17 +271,20 @@ K = K * torch.exp(self.log_scale)  # Scale final kernel by θ
 **Current Problem:**
 - `compute_covariance_deterministic(...)` computes K by integral approx.
 - Low-rank features L can be used to compute the approximated K for better interpretation
+- **Frequency grid inconsistency**: Low-rank training uses [0, omega_max] but `compute_covariance_deterministic()` uses [-omega_max/2, omega_max/2] (line 540)
 
 **Current Workaround:**
 - Using `compute_covariance_deterministic` for kernel evaluation
 - Expensive: O(n²M²) double integration over frequency domain
 - Works correctly but slow for large datasets
 - No relation between training and evaluation
+- Frequency grids differ between training and evaluation
 
 **Proposed Fix:**
 Need to properly calibrate the low-rank approximation K = LL^T to match the deterministic integration
 
 **Testing:**
+- [ ] Fix frequency grid inconsistency (standardize to either [0, omega_max] or [-omega_max/2, omega_max/2])
 - [ ] Determine K = LL^T
 - [ ] Verify numerical equivalence with deterministic method
 - [ ] Update test scripts to use low-rank evaluation

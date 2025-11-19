@@ -309,10 +309,13 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         # Compute spectral density matrix S[m,n] = s(omega_m, omega_n)
         S = self._compute_spectral_density_matrix(omega_grid)  # (num_freqs, num_freqs)
 
-        # Apply principled scaling
-        S = S * (spacing ** 2)
+        # Apply principled scaling (in-place to save memory)
+        S *= (spacing ** 2)
 
         # Compute matrix square root via Cholesky with adaptive jitter
+        # NOTE: Jitter becomes part of the kernel approximation K = LL^T
+        # since S_sqrt @ S_sqrt^T = S + jitter*I (not S). This is acceptable
+        # as the jitter is small (1e-6) and acts as implicit regularization.
         S_sqrt = self._safe_cholesky(S, jitter=1e-6, max_attempts=4)
 
         # Compute cosine basis: B[i,m] = cos(ω_m · x_i)
@@ -336,7 +339,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         self,
         L: torch.Tensor,
         y: torch.Tensor,
-        sigma2: float
+        sigma2: torch.Tensor
     ) -> torch.Tensor:
         r"""
         Compute GP marginal likelihood using low-rank NFF approximation.
@@ -350,8 +353,8 @@ class FactorizedSpectralDensityNetwork(nn.Module):
             Low-rank feature matrix
         y : torch.Tensor, shape (n,)
             Centered observations
-        sigma2 : float
-            Noise variance
+        sigma2 : torch.Tensor, scalar
+            Noise variance (must be positive)
 
         Returns
         -------
@@ -403,11 +406,15 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         #               = (sigma^2)^{n-r} · |W|
         # where W = sigma^2I_r + L^TL
         # Therefore: log|LL^T + sigma^2I| = (n-r)·log(sigma^2) + log|W|
-        log_det_sigma = (n - r) * torch.log(torch.tensor(sigma2, device=L.device, dtype=L.dtype))
+        log_det_sigma = (n - r) * torch.log(sigma2)
         log_det_W = 2 * torch.sum(torch.log(torch.diag(Lw)))  # log|W| = 2·sum(log(diag(Lw)))
         log_det = log_det_sigma + log_det_W
 
-        # ~ negative log marginal likelihood (const. and scaling removed)
+        # Negative log marginal likelihood (up to constant and scaling)
+        # NOTE: This is proportional to the true NLL. We omit:
+        #   - 0.5 factor (doesn't affect optimization)
+        #   - n log(2 pi) constant term (doesn't affect optimization)
+        # Full NLL = 0.5 * (data_fit + log_det) + 0.5*n*log(2 pi)
         nll = data_fit + log_det
 
         return nll
@@ -492,8 +499,9 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         K = torch.stack(K_rows) * volume / fourier_norm  # (n1, n2) - fully differentiable!
 
         if add_noise:
+            # Enforce symmetry: K should equal K^T but numerical errors can cause small asymmetry
             K = (K + K.T) / 2.0
-            K = K + noise_var * torch.eye(n1)
+            K += noise_var * torch.eye(n1, device=K.device, dtype=K.dtype)
 
         return K
 
@@ -568,8 +576,9 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         K = torch.stack(K_rows) * volume  # (n1, n2) - differentiable!
 
         if add_noise:
+            # Enforce symmetry: K should equal K^T but numerical errors can cause small asymmetry
             K = (K + K.T) / 2.0
-            K = K + noise_var * torch.eye(n1)
+            K += noise_var * torch.eye(n1, device=K.device, dtype=K.dtype)
 
         return K
 
@@ -646,10 +655,13 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         # Solve K⁻¹y
         alpha = torch.cholesky_solve(y_train.unsqueeze(-1), L).squeeze()
 
-        # ~ negative log marginal likelihood (const. and scaling removed)
+        # Negative log marginal likelihood (up to constant and scaling)
+        # NOTE: This is proportional to the true NLL. We omit:
+        #   - 0.5 factor (doesn't affect optimization)
+        #   - n log(2 pi) constant term (doesn't affect optimization)
+        # Full NLL = 0.5 * (data_fit + log_det) + 0.5*n*log(2 pi)
         data_fit = y_train @ alpha
         log_det = 2 * torch.sum(torch.log(torch.diag(L)))
-
         loss = data_fit + log_det
 
         return loss
