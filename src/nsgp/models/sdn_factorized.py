@@ -306,22 +306,27 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         # Apply principled scaling (in-place to save memory)
         S *= (spacing ** 2)
 
-        # Compute matrix square root via Cholesky with adaptive jitter
-        # NOTE: Jitter becomes part of the kernel approximation K = LL^T
-        # since S_sqrt @ S_sqrt^T = S + jitter*I (not S). This is acceptable
-        # as the jitter is small (1e-6) and acts as implicit regularization.
-        S_sqrt = self._safe_cholesky(S, jitter=1e-6, max_attempts=4)
+        # Compute matrix square root via eigendecomposition
+        # This is more stable than Cholesky for spectral matrices
+        eigenvalues, eigenvectors = torch.linalg.eigh(S)
 
-        # Compute cosine basis: B[i,m] = cos(ω_m · x_i)
+        # Clamp negative eigenvalues (from numerical errors) to small positive value
+        eigenvalues = torch.clamp(eigenvalues, min=1e-10)
+
+        # S_sqrt = Q @ sqrt(Lambda) @ Q^T, but we only need S_sqrt for multiplication
+        # S_sqrt such that S_sqrt @ S_sqrt^T = S
+        S_sqrt = eigenvectors @ torch.diag(torch.sqrt(eigenvalues))
+
+        # Compute cosine basis: B[i,m] = cos(omega_m x_i)
         # X: (n, d), omega_grid: (num_freqs, d) -> phases: (n, num_freqs)
         phases = X @ omega_grid.T  # (n, num_freqs)
         B = torch.cos(phases)  # (n, num_freqs)
 
-        # Correction for zero-th element (ω = 0)
+        # Correction for zero-th element (omega = 0)
         omega_norms = torch.norm(omega_grid, dim=1)  # (num_freqs,)
         is_zero = omega_norms < 1e-10
         if torch.any(is_zero):
-            B[:, is_zero] *= 0.5
+            B[:, is_zero] = 0.5
 
         # Compute low-rank features: L = 2 * B @ S^{1/2}
         # The factor of 2 accounts for the symmetry in the full Fourier transform
@@ -357,6 +362,23 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         """
         n = L.shape[0]
         r = L.shape[1]
+
+        # Input validation
+        if sigma2 <= 0:
+            raise ValueError(f"sigma2 must be positive, got {sigma2}")
+
+        if y.shape[0] != n:
+            raise ValueError(f"Shape mismatch: L has {n} rows but y has {y.shape[0]} elements")
+
+        if L.device != y.device:
+            raise ValueError(f"L and y must be on same device, got L on {L.device} and y on {y.device}")
+
+        if r > n:
+            import warnings
+            warnings.warn(
+                f"Rank r={r} exceeds number of data points n={n}. "
+                f"Low-rank approximation is inefficient in this regime. Consider r <= n."
+            )
 
         # Woodbury formula with numerical stability
         # Compute W = sigma^2 I_r + L^T L
@@ -519,8 +541,8 @@ class FactorizedSpectralDensityNetwork(nn.Module):
 
         n1, n2 = X1.shape[0], X2.shape[0]
 
-        # Frequency grid
-        omegas = torch.linspace(-self.omega_max/2, self.omega_max/2, self.n_features).unsqueeze(-1)
+        # Frequency grid: [0, omega_max] (standardized with low-rank training)
+        omegas = torch.linspace(0, self.omega_max, self.n_features).unsqueeze(-1)
 
         # FULL bivariate spectral density matrix s(ωₘ, ωₙ)
         S_full = self._compute_spectral_density_matrix(omegas)  # (M, M)
@@ -712,6 +734,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         epochs: int = 500,
         lr: float = 1e-2,
         noise_var: float = 0.01,
+        use_smoothness: bool = False,
         lambda_smooth: float = 0.1,
         patience: int = 100,
         use_lowrank: bool = True,
@@ -746,7 +769,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         use_smoothness : bool
             Enable spectral smoothness penalty (default: False)
         lambda_smooth : float
-            Smoothness regularization weight
+            Smoothness regularization weight (ignored if use_smoothness=True)
         patience : int
             Early stopping patience
         use_lowrank : bool
@@ -821,10 +844,11 @@ class FactorizedSpectralDensityNetwork(nn.Module):
                 )
 
             # Smoothness regularization
-            smooth_penalty = self.spectral_smoothness_penalty()
-
-            # Total loss
-            loss = data_loss + lambda_smooth * smooth_penalty
+            if use_smoothness:
+                smooth_penalty = self.spectral_smoothness_penalty()
+                loss = data_loss + lambda_smooth * smooth_penalty
+            else:
+                loss = data_loss
 
             # Backward pass
             loss.backward()
