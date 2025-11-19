@@ -118,6 +118,22 @@ k(x, x') = \int_{\R^d} \int_{\R^d} e^{i(\omega^\top x - \omega'^\top x')} s(\ome
 
 \textbf{Critical observation:} For nonstationary GPs, we \emph{cannot} simplify this to a single integral over $\omega \cdot (x - x')$. The full bivariate integral is essential.
 
+\textbf{Symmetry constraints.} For $s(\omega, \omega')$ to induce a valid covariance function, it must satisfy two fundamental symmetry properties:
+
+\begin{enumerate}
+\item \textbf{Hermitian symmetry}: From the Hermitian property of the covariance $k(x, x') = \overline{k(x', x)}$, the spectral density must satisfy
+\begin{equation}
+s(\omega, \omega') = \overline{s(\omega', \omega)}.
+\end{equation}
+
+\item \textbf{Real-valuedness}: For the covariance to be real-valued (i.e., $k(x, x') = \overline{k(x, x')}$), the spectral density must satisfy
+\begin{equation}
+s(\omega, \omega') = \overline{s(-\omega, -\omega')}.
+\end{equation}
+\end{enumerate}
+
+For real-valued harmonizable processes where $s(\omega, \omega') \in \R$, these conditions simplify to $s(\omega, \omega') = s(\omega', \omega)$ (symmetry) and $s(\omega, \omega') = s(-\omega, -\omega')$ (real-valuedness).
+
 \textbf{Positive definiteness constraint.} For $s(\omega, \omega')$ to induce a valid covariance, it must be positive semi-definite:
 \begin{equation}
 \int_{\R^d} \int_{\R^d} \overline{g(\omega)} s(\omega, \omega') g(\omega') \, d\omega \, d\omega' \geq 0, \quad \forall g \in L^2(\R^d).
