@@ -153,12 +153,15 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         omega_grid: torch.Tensor,
     ) -> torch.Tensor:
         r"""
-        Compute low-rank feature matrix L using spectral density matrix decomposition.
+        Compute low-rank feature matrix L using nonstationary Fourier features.
 
-        This computes K = LL^T where K ≈ B S^{1/2} (S^{1/2})^T B^T
+        This computes K = LL^T where K = B S^{1/2} (S^{1/2})^T B^T
         - B[i,m] = cos(omega_m x_i) is the cosine basis
-        - S[m,n] = s(omega_m, omega_n) \Delta omega^2 is the spectral density matrix with quadrature weights
+        - S[m,n] = s(omega_m, omega_n) \Delta omega^2 is the spectral process kernel
         - S^{1/2} is the Cholesky decomposition of S
+
+        The frequency grid should satisfy the constraint: π/Δω ≥ n*Δx
+        where Δx is the minimal spatial spacing and n is the number of spatial points.
 
         Parameters
         ----------
@@ -174,10 +177,32 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         """
         num_freqs = omega_grid.shape[0]
 
-        # Compute frequency spacing for quadrature weights
-        if num_freqs > 1:
-            spacing = torch.norm(omega_grid[1] - omega_grid[0])
+        # Check grid constraint: pi/ \Delta \omega >= n* \Delta x
+        n_pts = X.shape[0]
+
+        # Compute minimal spacing: \Delta x = min_j(x_{j+1} - x_j)
+        if n_pts > 1:
+            # Sort X to ensure we get consecutive differences
+            X_sorted = torch.sort(X.squeeze(), dim=0)[0]
+            spacings = X_sorted[1:] - X_sorted[:-1]
+            delta_x = spacings.min().item()
         else:
+            # TODO: Raise a warning for only one data point!
+            delta_x = 1.0
+
+        if num_freqs > 1:
+            spacing = torch.norm(omega_grid[1] - omega_grid[0]).item()
+            constraint_lhs = np.pi / spacing
+            constraint_rhs = n_pts * delta_x
+
+            if constraint_lhs < constraint_rhs:
+                import warnings
+                warnings.warn(
+                    f"Frequency grid may be too coarse: pi/ Delta omega = {constraint_lhs:.4f} < n* Delta x = {constraint_rhs:.4f}. "
+                    f"Consider using at least {int(np.ceil(omega_grid.max().item() / (np.pi / constraint_rhs)))+1} frequency points."
+                )
+        else: 
+            # TODO: Raise a warning for only one feature!
             spacing = 1.0
 
         # Compute spectral density matrix S[m,n] = s(omega_m, omega_n)
@@ -185,7 +210,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         f_omega = self.compute_features(omega_grid)  # (num_freqs, rank)
         S = f_omega @ f_omega.T  # (num_freqs, num_freqs)
 
-        # Apply quadrature weight scaling
+        # Apply principled scaling
         S = S * (spacing ** 2)
 
         # Add small jitter for numerical stability
@@ -225,7 +250,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         sigma2: float
     ) -> torch.Tensor:
         r"""
-        Compute GP marginal likelihood using Woodbury identity.
+        Compute GP marginal likelihood using low-rank NFF approximation.
 
         Given K = LL^T + \sigma^2 I, use:
             (LL^T + \sigma^2 I)^(-1) = (1/\sigma^2)[I - L(\sigma^2 I + L^TL)^(-1)L^T]
@@ -262,7 +287,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
             except RuntimeError:
                 if attempt == max_attempts - 1:
                     raise RuntimeError(
-                        f"Woodbury Cholesky failed after {max_attempts} attempts. "
+                        f"Cholesky failed after {max_attempts} attempts. "
                         f"Matrix W might not be positive-definite. Try increasing noise_var."
                     )
                 jitter *= 10
@@ -611,6 +636,8 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         noise_var: float = 0.01,
         lambda_smooth: float = 0.1,
         patience: int = 100,
+        use_lowrank: bool = True,
+        omega_grid: Optional[torch.Tensor] = None,
         use_mc_training: bool = True,
         mc_samples: int = 50,
         verbose: bool = True
@@ -618,9 +645,13 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         """
         Train the factorized SDN.
 
-        HYBRID APPROACH (like Remes et al. 2017):
-            - Training: Fast Monte Carlo integration (use_mc_training=True)
-            - Evaluation: Accurate deterministic quadrature (for metrics)
+        TRAINING METHODS:
+            1. Low-rank NFF approximation (use_lowrank=True, default):
+               Uses log_marginal_likelihood with compute_lowrank_features
+
+            2. Full covariance (use_lowrank=False):
+               Uses posterior_mean_loss with full covariance computation
+               Monte Carlo (use_mc_training=True) or deterministic quadrature
 
         Parameters
         ----------
@@ -634,14 +665,20 @@ class FactorizedSpectralDensityNetwork(nn.Module):
             Learning rate
         noise_var : float
             Observation noise variance
+        use_smoothness : bool
+            Enable spectral smoothness penalty (default: False)
         lambda_smooth : float
             Smoothness regularization weight
         patience : int
             Early stopping patience
+        use_lowrank : bool
+            Use low-rank NFF approximation (default: True)
+        omega_grid : torch.Tensor, optional
+            Frequency grid for low-rank method (if None, computes arange(0, n_features)*spacing)
         use_mc_training : bool
-            Use Monte Carlo for training (faster!)
+            Use Monte Carlo for full covariance training (ignored if use_lowrank=True)
         mc_samples : int
-            Number of MC samples during training
+            Number of MC samples during training (ignored if use_lowrank=True)
         verbose : bool
             Print training progress
 
@@ -653,7 +690,11 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         # Zero-mean the data
         y_train = y_train - y_train.mean()
 
-        # Optimizer with cosine annealing
+        # Prepare omega grid for low-rank method
+        if use_lowrank and omega_grid is None:
+            omega_grid = torch.linspace(0, self.omega_max, self.n_features).unsqueeze(-1)
+
+        # Optimizer
         optimizer = torch.optim.Adam(self.parameters(), lr=lr)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
             optimizer,
@@ -675,21 +716,31 @@ class FactorizedSpectralDensityNetwork(nn.Module):
             print(f"  Rank: {self.rank}")
             print(f"  Epochs: {epochs}")
             print(f"  Initial LR: {lr}")
-            print(f"  Method: {'Monte Carlo (fast)' if use_mc_training else 'Deterministic (accurate)'}")
-            if use_mc_training:
-                print(f"  MC Samples: {mc_samples}")
+            if use_lowrank:
+                print(f"  Method: Low-rank NFF")
+                print(f"  Omega grid: {omega_grid.shape[0]} points from 0 to {self.omega_max}")
+            else:
+                print(f"  Method: {'Monte Carlo (fast)' if use_mc_training else 'Deterministic (accurate)'}")
+                if use_mc_training:
+                    print(f"  MC Samples: {mc_samples}")
             print()
 
         for epoch in range(epochs):
             optimizer.zero_grad()
 
-            # Posterior mean loss - HYBRID approach!
-            data_loss = self.posterior_mean_loss(
-                X_train, y_train,
-                noise_var=noise_var,
-                use_mc=use_mc_training,
-                mc_samples=mc_samples
-            )
+            # Compute loss using selected method
+            if use_lowrank:
+                # Low-rank NFF
+                L = self.compute_lowrank_features(X_train, omega_grid)
+                data_loss = self.log_marginal_likelihood(L, y_train, noise_var)
+            else:
+                # Full covariance method
+                data_loss = self.posterior_mean_loss(
+                    X_train, y_train,
+                    noise_var=noise_var,
+                    use_mc=use_mc_training,
+                    mc_samples=mc_samples
+                )
 
             # Smoothness regularization
             smooth_penalty = self.spectral_smoothness_penalty()
