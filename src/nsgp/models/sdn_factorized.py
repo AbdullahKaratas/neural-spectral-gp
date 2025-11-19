@@ -97,8 +97,11 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         }.get(activation, nn.ELU())
 
     def compute_features(self, omega: torch.Tensor) -> torch.Tensor:
-        """
-        Compute feature vector f(ω) ∈ ℝʳ for frequency ω.
+        r"""
+        Compute feature vector f(\omega).
+
+        Enforces symmetry f(\omega) = f(-\omega) to ensure property:
+        s(-\omega, -\omega') = s(\omega, \omega')
 
         Parameters
         ----------
@@ -108,11 +111,15 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         Returns
         -------
         features : torch.Tensor, shape (n, r)
-            Feature vectors
+            Symmetric feature vectors
         """
         if omega.dim() == 1:
             omega = omega.unsqueeze(0)
-        return self.feature_net(omega)
+
+        # Symmetrize: f(\omega) = [\tilde{f}(\omega) + \tilde{f}(-\omega)] / 2
+        f_sym = (self.feature_net(omega) + self.feature_net(-omega)) / 2.0
+
+        return f_sym
 
     def forward(self, omega1: torch.Tensor, omega2: torch.Tensor) -> torch.Tensor:
         """
@@ -211,7 +218,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
 
         return L
 
-    def log_marginal_likelihood_woodbury(
+    def log_marginal_likelihood(
         self,
         L: torch.Tensor,
         y: torch.Tensor,
