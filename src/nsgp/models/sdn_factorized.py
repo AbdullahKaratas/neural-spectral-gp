@@ -42,6 +42,9 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         Frequency cutoff
     activation : str
         Activation function ('relu', 'elu', 'tanh')
+    enforce_symmetry : bool
+        If True, enforce f(omega) = f(-omega) to guarantee s(-omega,-omega') = s(omega,omega').
+        If False, use f(omega) directly (useful for debugging). Default: True.
     """
 
     def __init__(
@@ -51,7 +54,8 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         rank: int = 10,
         n_features: int = 50,
         omega_max: float = 8.0,
-        activation: str = 'elu'
+        activation: str = 'elu',
+        enforce_symmetry: bool = True
     ):
         super().__init__()
         self.input_dim = input_dim
@@ -59,6 +63,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         self.rank = rank
         self.n_features = n_features
         self.omega_max = omega_max
+        self.enforce_symmetry = enforce_symmetry
 
         # MLP: ω → feature vector f(ω) ∈ ℝʳ
         layers = []
@@ -96,11 +101,64 @@ class FactorizedSpectralDensityNetwork(nn.Module):
             'tanh': nn.Tanh(),
         }.get(activation, nn.ELU())
 
+    def _safe_cholesky(
+        self,
+        A: torch.Tensor,
+        jitter: float = 1e-6,
+        max_attempts: int = 4
+    ) -> torch.Tensor:
+        """
+        Compute Cholesky decomposition with adaptive jittering.
+
+        Attempts Cholesky decomposition with increasing jitter values.
+
+        Parameters
+        ----------
+        A : torch.Tensor, shape (..., n, n)
+            Symmetric positive semi-definite matrix
+        jitter : float
+            Initial jitter value to add to diagonal
+        max_attempts : int
+            Maximum number of attempts with increasing jitter
+
+        Returns
+        -------
+        L : torch.Tensor, shape (..., n, n)
+            Lower triangular Cholesky factor
+
+        Raises
+        ------
+        RuntimeError
+            If Cholesky fails after all attempts
+        """
+        current_jitter = jitter
+
+        for attempt in range(max_attempts):
+            A_jittered = A + current_jitter * torch.eye(
+                A.shape[-1], device=A.device, dtype=A.dtype
+            )
+
+            try:
+                L = torch.linalg.cholesky(A_jittered)
+                if attempt > 0:
+                    import warnings
+                    warnings.warn(
+                        f"Cholesky succeeded with jitter={current_jitter:.1e} after {attempt + 1} attempts"
+                    )
+                return L
+            except RuntimeError:
+                if attempt == max_attempts - 1:
+                    raise RuntimeError(
+                        f"Cholesky failed after {max_attempts} attempts with jitter up to {current_jitter:.1e}. "
+                        "Matrix might not be positive-definite."
+                    )
+                current_jitter *= 10
+
     def compute_features(self, omega: torch.Tensor) -> torch.Tensor:
         r"""
         Compute feature vector f(\omega).
 
-        Enforces symmetry f(\omega) = f(-\omega) to ensure property:
+        If enforce_symmetry=True, enforces f(\omega) = f(-\omega) to ensure:
         s(-\omega, -\omega') = s(\omega, \omega')
 
         Parameters
@@ -111,15 +169,43 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         Returns
         -------
         features : torch.Tensor, shape (n, r)
-            Symmetric feature vectors
+            Feature vectors (symmetrized if enforce_symmetry=True)
         """
         if omega.dim() == 1:
             omega = omega.unsqueeze(0)
 
-        # Symmetrize: f(\omega) = [\tilde{f}(\omega) + \tilde{f}(-\omega)] / 2
-        f_sym = (self.feature_net(omega) + self.feature_net(-omega)) / 2.0
+        if self.enforce_symmetry:
+            # Symmetrize: f(\omega) = [\tilde{f}(\omega) + \tilde{f}(-\omega)] / 2
+            f = (self.feature_net(omega) + self.feature_net(-omega)) / 2.0
+        else:
+            # Use features directly (for debugging or experimenting with weaker constraints)
+            f = self.feature_net(omega)
 
-        return f_sym
+        return f
+
+    def _compute_spectral_density_matrix(
+        self,
+        omega_grid: torch.Tensor
+    ) -> torch.Tensor:
+        """
+        Compute spectral density matrix S[m,n] = s(omega_m, omega_n).
+
+        Uses factorized representation: s(omega, omega') = f(omega)^T f(omega')
+        This guarantees S is positive semi-definite.
+
+        Parameters
+        ----------
+        omega_grid : torch.Tensor, shape (M, d)
+            Frequency grid points
+
+        Returns
+        -------
+        S : torch.Tensor, shape (M, M)
+            Spectral density matrix
+        """
+        f = self.compute_features(omega_grid)  # (M, r)
+        S = f @ f.T  # (M, M)
+        return S
 
     def forward(self, omega1: torch.Tensor, omega2: torch.Tensor) -> torch.Tensor:
         """
@@ -175,56 +261,59 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         L : torch.Tensor, shape (n, num_freqs)
             Low-rank feature matrix where K = LL^T
         """
-        num_freqs = omega_grid.shape[0]
+        # Input validation
+        if X.dim() not in [1]:
+            raise ValueError(f"X must be 1D tensor, got {X.dim()}D")
 
-        # Check grid constraint: pi/ \Delta \omega >= n* \Delta x
+        if omega_grid.dim() not in [1]:
+            raise ValueError(f"omega_grid must be 1D tensor, got {omega_grid.dim()}D")
+
+        if not torch.is_floating_point(X):
+            raise TypeError(f"X must be floating point tensor, got {X.dtype}")
+
+        if not torch.is_floating_point(omega_grid):
+            raise TypeError(f"omega_grid must be floating point tensor, got {omega_grid.dtype}")
+
+        num_freqs = omega_grid.shape[0]
         n_pts = X.shape[0]
 
+        # Validate minimum requirements
+        if num_freqs < 2:
+            raise ValueError(
+                f"Frequency grid must contain at least 2 points, got {num_freqs}. "
+                "Low-rank approximation requires multiple frequency samples to compute spacing."
+            )
+
+        if n_pts < 2:
+            raise ValueError(
+                f"Spatial locations X must contain at least 2 points, got {n_pts}. "
+                "Low-rank approximation requires multiple spatial points to compute spacing."
+            )
+
         # Compute minimal spacing: \Delta x = min_j(x_{j+1} - x_j)
-        if n_pts > 1:
-            # Sort X to ensure we get consecutive differences
-            X_sorted = torch.sort(X.squeeze(), dim=0)[0]
-            spacings = X_sorted[1:] - X_sorted[:-1]
-            delta_x = spacings.min().item()
-        else:
-            # TODO: Raise a warning for only one data point!
-            delta_x = 1.0
+        X_sorted = torch.sort(X.squeeze(), dim=0)[0]
+        spacings = X_sorted[1:] - X_sorted[:-1]
+        delta_x = spacings.min().item()
 
-        if num_freqs > 1:
-            spacing = torch.norm(omega_grid[1] - omega_grid[0]).item()
-            constraint_lhs = np.pi / spacing
-            constraint_rhs = n_pts * delta_x
+        spacing = torch.norm(omega_grid[1] - omega_grid[0]).item()
+        constraint_lhs = np.pi / spacing
+        constraint_rhs = n_pts * delta_x
 
-            if constraint_lhs < constraint_rhs:
-                import warnings
-                warnings.warn(
-                    f"Frequency grid may be too coarse: pi/ Delta omega = {constraint_lhs:.4f} < n* Delta x = {constraint_rhs:.4f}. "
-                    f"Consider using at least {int(np.ceil(omega_grid.max().item() / (np.pi / constraint_rhs)))+1} frequency points."
-                )
-        else: 
-            # TODO: Raise a warning for only one feature!
-            spacing = 1.0
+        if constraint_lhs < constraint_rhs:
+            import warnings
+            warnings.warn(
+                f"Frequency grid may be too coarse: pi/spacing = {constraint_lhs:.4f} < n*delta_x = {constraint_rhs:.4f}. "
+                f"Consider using at least {int(np.ceil(omega_grid.max().item() / (np.pi / constraint_rhs)))+1} frequency points."
+            )
 
         # Compute spectral density matrix S[m,n] = s(omega_m, omega_n)
-        # Using the learned factorized representation: s(omega,omega') = f(omega)^T f(omega')
-        f_omega = self.compute_features(omega_grid)  # (num_freqs, rank)
-        S = f_omega @ f_omega.T  # (num_freqs, num_freqs)
+        S = self._compute_spectral_density_matrix(omega_grid)  # (num_freqs, num_freqs)
 
         # Apply principled scaling
         S = S * (spacing ** 2)
 
-        # Add small jitter for numerical stability
-        jitter = 1e-6
-        S = S + jitter * torch.eye(num_freqs, device=S.device, dtype=S.dtype)
-
-        # Compute matrix square root via Cholesky: S = LL^T => S^{1/2} = L
-        try:
-            S_sqrt = torch.linalg.cholesky(S)  # (num_freqs, num_freqs)
-        except RuntimeError:
-            # Fallback: use eigendecomposition
-            eigenvalues, eigenvectors = torch.linalg.eigh(S)
-            eigenvalues = torch.clamp(eigenvalues, min=0)
-            S_sqrt = eigenvectors @ torch.diag(torch.sqrt(eigenvalues)) @ eigenvectors.T
+        # Compute matrix square root via Cholesky with adaptive jitter
+        S_sqrt = self._safe_cholesky(S, jitter=1e-6, max_attempts=4)
 
         # Compute cosine basis: B[i,m] = cos(ω_m · x_i)
         # X: (n, d), omega_grid: (num_freqs, d) -> phases: (n, num_freqs)
@@ -269,28 +358,34 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         nll : torch.Tensor
             Negative log marginal likelihood
         """
+        # Input validation
+        if L.dim() != 2:
+            raise ValueError(f"L must be 2D tensor, got {L.dim()}D")
+
+        if y.dim() != 1:
+            raise ValueError(f"y must be 1D tensor, got {y.dim()}D")
+
+        if not torch.is_floating_point(L):
+            raise TypeError(f"L must be floating point tensor, got {L.dtype}")
+
+        if not torch.is_floating_point(y):
+            raise TypeError(f"y must be floating point tensor, got {y.dtype}")
+
         n = L.shape[0]
         r = L.shape[1]
 
+        if y.shape[0] != n:
+            raise ValueError(f"Shape mismatch: L has {n} rows but y has {y.shape[0]} elements")
+
+        if sigma2 <= 0:
+            raise ValueError(f"sigma2 must be positive, got {sigma2}")
+
         # Woodbury formula with numerical stability
-        # Add regularization for numerical stability
-        jitter = 1e-5
-        max_attempts = 4
+        # Compute W = sigma^2 I_r + L^T L
+        W = sigma2 * torch.eye(r, device=L.device, dtype=L.dtype) + (L.T @ L)
 
-        for attempt in range(max_attempts):
-            W = sigma2 * torch.eye(r, device=L.device, dtype=L.dtype) + (L.T @ L)
-            W = W + jitter * torch.eye(r, device=L.device, dtype=L.dtype)
-
-            try:
-                Lw = torch.linalg.cholesky(W)
-                break
-            except RuntimeError:
-                if attempt == max_attempts - 1:
-                    raise RuntimeError(
-                        f"Cholesky failed after {max_attempts} attempts. "
-                        f"Matrix W might not be positive-definite. Try increasing noise_var."
-                    )
-                jitter *= 10
+        # Compute Cholesky with adaptive jitter
+        Lw = self._safe_cholesky(W, jitter=1e-6, max_attempts=4)
 
         # Solve (LL^T + sigma^2 I)^(-1) y using Woodbury formula
         # alpha = (1/sigma^2)[y - L W^(-1) L^T y]
@@ -368,8 +463,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         omegas = (torch.rand(n_samples, self.input_dim) - 0.5) * self.omega_max
 
         # Compute FULL spectral density matrix - PSD GUARANTEED!
-        f_all = self.compute_features(omegas)  # (n_samples, r)
-        S_full = f_all @ f_all.T  # (n_samples, n_samples) - s(ωₘ, ωₙ) via factorization!
+        S_full = self._compute_spectral_density_matrix(omegas)  # (n_samples, n_samples)
         # ✓ S_full is ALWAYS PSD by construction!
 
         # Monte Carlo integration weights
@@ -446,8 +540,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         omegas = torch.linspace(-self.omega_max/2, self.omega_max/2, self.n_features).unsqueeze(-1)
 
         # FULL bivariate spectral density matrix s(ωₘ, ωₙ)
-        f_all = self.compute_features(omegas)  # (M, r)
-        S_full = f_all @ f_all.T  # (M, M) - s(ωₘ, ωₙ) via factorization!
+        S_full = self._compute_spectral_density_matrix(omegas)  # (M, M)
 
         # Integration weights
         dw = self.omega_max / self.n_features if self.n_features > 1 else self.omega_max
