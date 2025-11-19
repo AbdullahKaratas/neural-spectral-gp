@@ -212,22 +212,14 @@ Remes 2017 & 38\% & 145\% & 165\% & ✗ (fails) & ✗ (3/10) \\
 
 **Current Problem:**
 - Training uses CosineAnnealingWarmRestarts scheduler + early stopping with model restoration and smoothness penalty
-- This approach can lead to poor kernel approximation despite achieving lower loss values
+- This approach is overly complex, start with simple training is maybe better for PoC
 
 **Issue:**
 - Scheduler causes learning rate to cycle, leading to instability
-- Early stopping restoration saves model with lowest marginal likelihood
 
 **Recommendation:**
-- Remove CosineAnnealingWarmRestarts scheduler (use plain Adam)
-- Remove early stopping restoration logic (use final epoch model)
+- Use plain Adam
 - Remove smoothness penalty (always enabled currently, adds computational cost with no clear benefit)
-- Keep patience for stopping, but don't restore "best" model
-
-**Evidence:**
-- With scheduler + restoration: 99.5% relative error, kernel range [-0.04, 0.04]
-- Without scheduler, no restoration: 65.7% relative error, kernel range [-0.17, 1.61]
-- Same configuration otherwise (lr=0.01, 2000 epochs, 50 freq points)
 
 **Action Items:**
 - [ ] Remove scheduler from fit() method
@@ -235,6 +227,44 @@ Remes 2017 & 38\% & 145\% & 165\% & ✗ (fails) & ✗ (3/10) \\
 - [ ] Remove or test smoothness penalty benefits
 - [ ] Test on all synthetic kernels to verify improvement
 - [ ] Update documentation to reflect simplified training approach
+
+## TODO: Add Learnable Kernel Scaling Parameter
+
+**Motivation:**
+- Current kernel scale is determined implicitly by network weights
+- Often results in scale mismatch (learned variance 28-46% of empirical variance)
+- Manual post-hoc scaling could work but not elegant
+
+**Proposal:**
+Add learnable scaling parameter θ to the covariance:
+```
+K = θ * LL^T
+```
+
+**Implementation:**
+```python
+# In __init__:
+self.log_scale = nn.Parameter(torch.tensor(0.0))  # θ = exp(log_scale)
+
+# In compute_lowrank_features:
+L = 2.0 * B @ S_sqrt
+L = L * torch.exp(0.5 * self.log_scale)  # Scale features by √θ
+
+# In compute_covariance_deterministic:
+K = ... (current computation)
+K = K * torch.exp(self.log_scale)  # Scale final kernel by θ
+```
+
+**Benefits:**
+- Network learns correlation structure
+- Scaling parameter learns overall amplitude
+- Separates two aspects of kernel learning
+- Should improve scale matching
+
+**Testing:**
+- [ ] Implement learnable log_scale parameter
+- [ ] Test on all synthetic kernels
+- [ ] Compare variance matching before/after
 
 ---
 
