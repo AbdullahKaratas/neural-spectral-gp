@@ -266,6 +266,26 @@ K = K * torch.exp(self.log_scale)  # Scale final kernel by θ
 - [ ] Test on all synthetic kernels
 - [ ] Compare variance matching before/after
 
+## TODO: Add Low-Rank Kernel Evaluation
+
+**Current Problem:**
+- `compute_covariance_deterministic(...)` computes K by integral approx.
+- Low-rank features L can be used to compute the approximated K for better interpretation
+
+**Current Workaround:**
+- Using `compute_covariance_deterministic` for kernel evaluation
+- Expensive: O(n²M²) double integration over frequency domain
+- Works correctly but slow for large datasets
+- No relation between training and evaluation
+
+**Proposed Fix:**
+Need to properly calibrate the low-rank approximation K = LL^T to match the deterministic integration
+
+**Testing:**
+- [ ] Determine K = LL^T
+- [ ] Verify numerical equivalence with deterministic method
+- [ ] Update test scripts to use low-rank evaluation
+
 ---
 
 # ⚡ WEEK 1.5-2: COMPUTATIONAL OPTIMIZATION (CRITICAL FOR SCALING)
