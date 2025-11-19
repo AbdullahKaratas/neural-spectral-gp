@@ -262,12 +262,6 @@ class FactorizedSpectralDensityNetwork(nn.Module):
             Low-rank feature matrix where K = LL^T
         """
         # Input validation
-        if X.dim() not in [1]:
-            raise ValueError(f"X must be 1D tensor, got {X.dim()}D")
-
-        if omega_grid.dim() not in [1]:
-            raise ValueError(f"omega_grid must be 1D tensor, got {omega_grid.dim()}D")
-
         if not torch.is_floating_point(X):
             raise TypeError(f"X must be floating point tensor, got {X.dtype}")
 
@@ -361,27 +355,8 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         nll : torch.Tensor
             Negative log marginal likelihood
         """
-        # Input validation
-        if L.dim() != 2:
-            raise ValueError(f"L must be 2D tensor, got {L.dim()}D")
-
-        if y.dim() != 1:
-            raise ValueError(f"y must be 1D tensor, got {y.dim()}D")
-
-        if not torch.is_floating_point(L):
-            raise TypeError(f"L must be floating point tensor, got {L.dtype}")
-
-        if not torch.is_floating_point(y):
-            raise TypeError(f"y must be floating point tensor, got {y.dtype}")
-
         n = L.shape[0]
         r = L.shape[1]
-
-        if y.shape[0] != n:
-            raise ValueError(f"Shape mismatch: L has {n} rows but y has {y.shape[0]} elements")
-
-        if sigma2 <= 0:
-            raise ValueError(f"sigma2 must be positive, got {sigma2}")
 
         # Woodbury formula with numerical stability
         # Compute W = sigma^2 I_r + L^T L
