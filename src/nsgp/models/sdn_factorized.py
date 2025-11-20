@@ -344,9 +344,9 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         if torch.any(is_zero):
             B[:, is_zero] = 0.5
 
-        # Compute low-rank features: L = 2 * B @ S^{1/2}
-        # The factor of 2 accounts for the symmetry in the full Fourier transform
-        L = 2.0 * B @ S_sqrt  # (n, num_freqs)
+        # Compute low-rank features: L = B @ S^{1/2}
+        # S already includes (Δω)² scaling, no additional factor needed
+        L = B @ S_sqrt  # (n, num_freqs)
         
         # Apply learnable scale: L_scaled = sqrt(theta) * L
         L = L * torch.exp(0.5 * self.log_scale)
@@ -604,9 +604,9 @@ class FactorizedSpectralDensityNetwork(nn.Module):
             B1[:, is_zero] = 0.5
             B2[:, is_zero] = 0.5
             
-        # Compute L = 2 * B @ S_sqrt
-        L1 = 2.0 * B1 @ S_sqrt
-        L2 = 2.0 * B2 @ S_sqrt
+        # Compute L = B @ S_sqrt (S already includes Δω² scaling)
+        L1 = B1 @ S_sqrt
+        L2 = B2 @ S_sqrt
 
         # Apply learnable scale: L_scaled = sqrt(θ) * L
         # This ensures K = L·L^T = θ · K_base (consistent with training)

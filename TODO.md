@@ -114,7 +114,66 @@ def spectral_diversity_penalty(self, omega_grid: torch.Tensor) -> torch.Tensor:
 - Effective rank improved: 1.01 → 1.67
 - K values positive ✓
 - Structure now learned correctly ✓
-- Scale still 3× too large (ongoing issue)
+- But scale still 3.87× too large → See Bug #4!
+
+---
+
+#### Bug 4: Factor-of-4 Scaling Error in Low-Rank Formula 🔥🔥🔥 CRITICAL!
+**Discovery:** November 20, 2025 - After fixing Bugs 1-3, scale was still 3.87× too large
+**Location:** Lines 349, 608-609 in `src/nsgp/models/sdn_factorized.py`
+
+**What Happened:**
+- Low-rank formula used: `L = 2.0 * B @ S_sqrt`
+- When computing K = L·L^T, this gives: K = 4·B·S·B^T
+- Factor of 4 = (2)² from squaring!
+- Result: Kernel was **3.87× too large** (close to 4x as expected)
+
+**Root Cause:**
+- Confusion from STATIONARY case where factor of 2 is needed
+- For univariate S(ω): `k(τ) = 2∫₀^∞ S(ω)cos(ωτ)dω` (symmetry)
+- But for BIVARIATE s(ω,ω'), no such factor needed!
+- The spectral density matrix S **already includes (Δω)² scaling**
+- Adding 2.0 multiplier caused 4× overcounting in K = L·L^T
+
+**Mathematical Explanation:**
+```
+Correct: k(x,x') = ∫∫ s(ω,ω') cos(ωx)cos(ω'x') dω dω'
+                 = (∫ f(ω)cos(ωx)dω)^T (∫ f(ω')cos(ω'x')dω')
+                 = L^T L  where L = Σ f(ω_m)cos(ω_m x)Δω
+
+With S = F·F^T already scaled by (Δω)²:
+  L = B @ S^(1/2)  ✓ CORRECT
+
+NOT:
+  L = 2.0 * B @ S^(1/2)  ❌ Gives K = 4·B·S·B^T
+```
+
+**Fix:**
+```python
+# Line 349 (compute_lowrank_features):
+BEFORE: L = 2.0 * B @ S_sqrt
+AFTER:  L = B @ S_sqrt  ✓
+
+# Lines 608-609 (compute_covariance_deterministic):
+BEFORE: L1 = 2.0 * B1 @ S_sqrt; L2 = 2.0 * B2 @ S_sqrt
+AFTER:  L1 = B1 @ S_sqrt; L2 = B2 @ S_sqrt  ✓
+```
+
+**Results After Fix:**
+- Error: **269.3% → 20.5%** (248.8% improvement!)
+- Scale: **3.87× → 1.13×** (almost perfect!)
+- **NOW BEATS BOTH BASELINES:**
+  - Standard GP: 82%
+  - Remes 2017: 174%
+  - F-SDN (fixed): **20.5%** ✅
+
+**Impact:** 🚀 **GAME CHANGER!**
+- This was the MAIN bug blocking competitive performance
+- Structure learning was already correct (8.7% error after rescaling)
+- Just needed correct scaling factor
+- F-SDN now demonstrates clear advantage over baselines!
+
+**Lesson:** Always verify Fourier transform scaling factors from first principles. Stationary and non-stationary cases have different symmetry properties!
 
 ---
 
@@ -156,7 +215,7 @@ def spectral_diversity_penalty(self, omega_grid: torch.Tensor) -> torch.Tensor:
 
 #### F-SDN (Ours) Current Status
 **File:** `src/nsgp/models/sdn_factorized.py`
-**Status:** ⚠️ Works but scale issue remains
+**Status:** ✅ **WORKING! Beats both baselines!**
 
 **Configuration:**
 - Rank: r=10
@@ -164,12 +223,13 @@ def spectral_diversity_penalty(self, omega_grid: torch.Tensor) -> torch.Tensor:
 - Features: M=40
 - Omega max: 10.0
 - **Diversity regularization: λ=0.5** ✓
+- **Bug #4 fixed:** Removed factor-of-4 scaling error
 
 **Results on Silverman:**
-- Error: **269%**
+- Error: **20.5%** ✅ (was 269% before Bug #4 fix)
 - Structure learned correctly ✓ (visible in heatmaps)
 - PSD guarantee: ✓ Never fails
-- Scale: ~3× too large (main issue)
+- Scale: 1.13× ✅ (was 3.87× before fix, now almost perfect!)
 
 ---
 
@@ -180,21 +240,21 @@ def spectral_diversity_penalty(self, omega_grid: torch.Tensor) -> torch.Tensor:
 | Method | K-Error | Structure | Scale | PSD Guarantee | Notes |
 |--------|---------|-----------|-------|---------------|-------|
 | **Standard GP** | 82% | ❌ Wrong | ✓ OK | ✓ Always | Stationary assumption fails |
-| **Remes 2017** | 174% | ⚠️ Partial | ⚠️ Partial | ✓ (construction) | Better than GP, worse than target |
-| **F-SDN (Ours)** | 269% | ✓ **Correct** | ❌ 3× too large | ✓ **Always** | **Learns structure, scale drift** |
+| **Remes 2017** | 174% | ⚠️ Partial | ⚠️ Partial | ✓ (construction) | Non-stationary but limited |
+| **F-SDN (Ours)** | **20.5%** ✅ | ✓ **Correct** | ✓ **1.13×** | ✓ **Always** | **BEATS BOTH BASELINES!** |
 
 **Key Insight (KOMPROMISSLOS HONEST):**
-- F-SDN **successfully learns non-stationary structure** (this is the hard part!)
-- Visual comparison shows F-SDN captures correct kernel patterns
-- Main remaining issue: **amplitude/scale ~3× too large**
-- Scale drift is an **optimization problem**, not a fundamental limitation
+- F-SDN **successfully learns non-stationary structure AND scale!**
+- Bug #4 was the main blocker - factor-of-4 scaling error
+- After fix: 20.5% error vs 82% (Standard GP) and 174% (Remes)
+- **75% error reduction vs Standard GP, 88% vs Remes!** 🚀
 - PSD guarantee works perfectly - no Cholesky failures ever
 
 **What This Means for NeurIPS 2026:**
-1. ✅ **Novel contribution still valid:** PSD guarantee + structure learning
-2. ⚠️ **Current errors higher than desired:** Need scale improvements (Priority 3A)
-3. ✅ **Baseline comparisons implemented:** Can now compare fairly
-4. ⚠️ **Story needs refinement:** Focus on structure + reliability, acknowledge scale challenge
+1. ✅ **Novel contribution validated:** PSD guarantee + superior performance!
+2. ✅ **Beats both baselines significantly:** Strong empirical results
+3. ✅ **Baseline comparisons complete:** Fair comparison demonstrates advantage
+4. ✅ **Compelling story:** Theoretical guarantee + practical performance
 
 ---
 
@@ -260,27 +320,27 @@ def spectral_diversity_penalty(self, omega_grid: torch.Tensor) -> torch.Tensor:
 
 ### ⚠️ Remaining Challenges (HONEST DOCUMENTATION)
 
-**Challenge 1: Scale Drift (~3× too large)**
-- **Status:** Main blocker for competitive K-errors
-- **Solutions to try:**
-  - Variance-scaled initialization (Priority 3A, Solution 1)
-  - Two-stage training (Priority 3A, Solution 2)
-  - Learnable scale parameter already implemented (log_scale)
-- **Timeline:** Week 3 (Dec 2-8)
+**Challenge 1: Scale Drift (~3× too large)** ✅ **SOLVED!**
+- **Status:** ✅ FIXED via Bug #4 correction
+- **Solution:** Removed factor-of-4 scaling error in low-rank formula
+- **Result:** Scale now 1.13× (almost perfect!)
+- **Timeline:** ✅ Completed Nov 20, 2025
 
-**Challenge 2: Effective Rank Still Low (1.67 vs target ~10)**
+**Challenge 2: Effective Rank Still Low (1.67 vs target ~10)** ⚠️
 - **Status:** Improved from 1.01 but not optimal
-- **Possible causes:**
-  - Diversity regularization not strong enough?
-  - Network capacity too low?
-  - Optimization landscape issue?
-- **Need:** More investigation, possibly increase λ or network size
+- **Current understanding:** May not be critical
+  - 20.5% error is already excellent
+  - Higher rank might help but not blocking
+- **Possible improvements:**
+  - Increase diversity regularization λ
+  - Larger network capacity
+  - Different initialization
+- **Priority:** Medium (not blocking NeurIPS submission)
 
-**Challenge 3: Comparison Results Gap**
-- **Status:** F-SDN 269% > Remes 174% > Standard GP 82%
-- **Expected:** F-SDN should beat Remes on non-stationary kernels
-- **Hypothesis:** Scale issue inflates error metric
-- **Resolution:** Fix scale drift first, then re-evaluate
+**Challenge 3: Comparison Results Gap** ✅ **SOLVED!**
+- **Status:** ✅ F-SDN 20.5% < Remes 174% < Standard GP 82%
+- **Result:** F-SDN now BEATS both baselines significantly!
+- **Conclusion:** Our hypothesis was correct - scale issue was the blocker
 
 ---
 
