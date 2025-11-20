@@ -473,7 +473,6 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         # Monte Carlo integration weights
         dw_mc = self.omega_max / n_samples  # Per-dimension weight
         volume = dw_mc * dw_mc  # 2D integration volume
-        fourier_norm = (2 * np.pi) ** self.input_dim
 
         # Pre-compute ω @ X matrices
         omega_X1 = omegas @ X1.T  # (n_samples, n1)
