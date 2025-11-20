@@ -244,10 +244,28 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         This computes K = LL^T where K = B S^{1/2} (S^{1/2})^T B^T
         - B[i,m] = cos(omega_m x_i) is the cosine basis
         - S[m,n] = s(omega_m, omega_n) \Delta omega^2 is the spectral process kernel
-        - S^{1/2} is the Cholesky decomposition of S
+        - S^{1/2} is the matrix square root of S
 
-        The frequency grid should satisfy the constraint: π/Δω ≥ n*Δx
-        where Δx is the minimal spatial spacing and n is the number of spatial points.
+        Frequency Grid Constraint (Periodicity Condition)
+        --------------------------------------------------
+        The low-rank kernel approximation introduces periodicity with spatial
+        period 2 pi/Delta omega. To avoid artifacts from periodic repetition within the
+        spatial domain, the frequency grid spacing Δω must satisfy:
+
+            2 pi/Delta omega >= L
+
+        where L is the spatial domain extent. For n discrete points with
+        minimal spacing Δx, we approximate L = n Delta x, giving:
+
+            2 pi/Delta omega ≥ n Delta x
+
+        Implementation uses more conservative constraint:
+
+            pi/Delta omega ≥ n Delta x  (factor 2 safety margin)
+
+        Physical interpretation:
+        - Kernel is periodic with period 2π/Δω in each argument
+        - Conservative constraint ensures robust approximation quality
 
         Parameters
         ----------
