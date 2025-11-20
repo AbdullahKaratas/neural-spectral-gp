@@ -65,7 +65,12 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         self.omega_max = omega_max
         self.enforce_symmetry = enforce_symmetry
 
+        # Learnable global scale (log variance)
+        # Initialize to -2.0 for moderate initial scale (exp(-2) ≈ 0.135)
+        self.log_scale = nn.Parameter(torch.tensor(-2.0))
+
         # MLP: ω → feature vector f(ω) ∈ ℝʳ
+        # This is the core of the low-rank factorization
         layers = []
         prev_dim = input_dim
 
@@ -76,20 +81,27 @@ class FactorizedSpectralDensityNetwork(nn.Module):
 
         # Output: r-dimensional feature vector
         layers.append(nn.Linear(prev_dim, rank))
-        # No final activation - features can be positive or negative
-        # (PD is ensured by the dot product)
+
+        # Add final activation to bound features and prevent explosion
+        # Tanh bounds to [-1, 1], helping with stable training
+        layers.append(nn.Tanh())
 
         self.feature_net = nn.Sequential(*layers)
 
-        # Initialize to small values
+        # Initialize with Xavier (better than std=0.01)
         self._init_weights()
+        
+        for name, param in self.named_parameters():
+            if torch.isnan(param).any():
+                print(f"PARAM {name} HAS NaNs AFTER INIT!")
 
     def _init_weights(self):
-        """Initialize to small random values for stable training."""
+        """Initialize with Xavier uniform for stable training."""
         for m in self.modules():
             if isinstance(m, nn.Linear):
-                # Balanced initialization (not too small, not too large)
-                nn.init.normal_(m.weight, mean=0.0, std=0.01)
+                # Xavier initialization - good default for tanh/sigmoid activations
+                # gain=1.0 for tanh (default)
+                nn.init.xavier_uniform_(m.weight, gain=1.0)
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
 
@@ -180,6 +192,10 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         else:
             # Use features directly (for debugging or experimenting with weaker constraints)
             f = self.feature_net(omega)
+            
+        if torch.isnan(f).any():
+             print("compute_features produced NaNs!")
+             print(f"omega stats: {omega.min()}/{omega.max()}")
 
         return f
 
@@ -331,6 +347,14 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         # Compute low-rank features: L = 2 * B @ S^{1/2}
         # The factor of 2 accounts for the symmetry in the full Fourier transform
         L = 2.0 * B @ S_sqrt  # (n, num_freqs)
+        
+        # Apply learnable scale: L_scaled = sqrt(theta) * L
+        L = L * torch.exp(0.5 * self.log_scale)
+
+        if torch.isnan(L).any() or L.abs().max() > 10.0:
+             print(f"L explosion! Max: {L.abs().max()}")
+             print(f"S max: {S.max()}, S_sqrt max: {S_sqrt.max()}")
+             print(f"log_scale: {self.log_scale.item()}")
 
         return L
 
@@ -403,7 +427,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         #               = (sigma^2)^{n-r} · |W|
         # where W = sigma^2I_r + L^TL
         # Therefore: log|LL^T + sigma^2I| = (n-r)·log(sigma^2) + log|W|
-        log_det_sigma = (n - r) * torch.log(sigma2)
+        log_det_sigma = (n - r) * torch.log(torch.as_tensor(sigma2))
         log_det_W = 2 * torch.sum(torch.log(torch.diag(Lw)))  # log|W| = 2·sum(log(diag(Lw)))
         log_det = log_det_sigma + log_det_W
 
@@ -541,42 +565,61 @@ class FactorizedSpectralDensityNetwork(nn.Module):
 
         n1, n2 = X1.shape[0], X2.shape[0]
 
-        # Frequency grid: [0, omega_max] (standardized with low-rank training)
+        # Compute covariance using low-rank approximation K = LL^T
+        # This is consistent with training and much faster than double integration
+        
+        # Frequency grid
         omegas = torch.linspace(0, self.omega_max, self.n_features).unsqueeze(-1)
-
-        # FULL bivariate spectral density matrix s(ωₘ, ωₙ)
-        S_full = self._compute_spectral_density_matrix(omegas)  # (M, M)
-
-        # Integration weights
+        
+        # Compute spectral density matrix S
+        S = self._compute_spectral_density_matrix(omegas)
+        
+        # Apply spacing scaling
         dw = self.omega_max / self.n_features if self.n_features > 1 else self.omega_max
-        volume = dw * dw
+        S *= (dw ** 2)
+        
+        # Compute matrix square root
+        eigenvalues, eigenvectors = torch.linalg.eigh(S)
+        eigenvalues = torch.clamp(eigenvalues, min=1e-10)
+        S_sqrt = eigenvectors @ torch.diag(torch.sqrt(eigenvalues))
+        
+        if self.log_scale.item() > -10: # Only print once or if scale is reasonable
+             print(f"DEBUG COV: S_max={S.max().item():.4f}, S_sqrt_max={S_sqrt.max().item():.4f}")
+             print(f"DEBUG COV: dw={dw:.4f}, log_scale={self.log_scale.item():.4f}")
+        
+        # Compute cosine basis B
+        phases = X1 @ omegas.T
+        B1 = torch.cos(phases)
+        
+        if X2 is not None:
+            phases2 = X2 @ omegas.T
+            B2 = torch.cos(phases2)
+        else:
+            B2 = B1
+            
+        # Correction for zero frequency
+        omega_norms = torch.norm(omegas, dim=1)
+        is_zero = omega_norms < 1e-10
+        if torch.any(is_zero):
+            B1[:, is_zero] = 0.5
+            B2[:, is_zero] = 0.5
+            
+        # Compute L = 2 * B @ S_sqrt
+        L1 = 2.0 * B1 @ S_sqrt
+        L2 = 2.0 * B2 @ S_sqrt
 
-        # Pre-compute ω @ X matrices
-        omega_X1 = (omegas @ X1.T).squeeze()  # (M, n1)
-        omega_X2 = (omegas @ X2.T).squeeze()  # (M, n2)
+        # Apply learnable scale: L_scaled = sqrt(θ) * L
+        # This ensures K = L·L^T = θ · K_base (consistent with training)
+        scale_factor = torch.exp(0.5 * self.log_scale)
+        L1 = L1 * scale_factor
+        L2 = L2 * scale_factor
 
-        # Double sum - GRADIENT SAFE (no .item()!)
-        # Build K row by row to preserve gradients
-        K_rows = []
-        for i in range(n1):
-            K_row = []
-            for j in range(n2):
-                # phases[m,n] = ωₘ·xᵢ - ωₙ·xⱼ
-                # Broadcasting: (M, 1) - (1, M).T = (M, M)
-                phases = omega_X1[:, i:i+1] - omega_X2[:, j:j+1].T  # (M, M)
-
-                # K[i,j] = ΣₘΣₙ s(ωₘ,ωₙ) cos(ωₘ·xᵢ - ωₙ·xⱼ)
-                k_ij = torch.sum(S_full * torch.cos(phases))
-                K_row.append(k_ij)
-            K_rows.append(torch.stack(K_row))
-
-        K = torch.stack(K_rows) * volume  # (n1, n2) - differentiable!
-
+        # K = L1 @ L2.T
+        K = L1 @ L2.T
+        
         if add_noise:
-            # Enforce symmetry: K should equal K^T but numerical errors can cause small asymmetry
-            K = (K + K.T) / 2.0
-            K += noise_var * torch.eye(n1, device=K.device, dtype=K.dtype)
-
+            K = K + noise_var * torch.eye(n1, device=K.device, dtype=K.dtype)
+            
         return K
 
     def posterior_mean_loss(
@@ -686,6 +729,47 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         # L2 norm of gradient
         return torch.mean(grad ** 2)
 
+    def spectral_diversity_penalty(self, omega_grid: torch.Tensor) -> torch.Tensor:
+        """
+        Encourage diverse spectral structure (prevent rank collapse).
+
+        Uses eigenvalue entropy to ensure S has multiple significant eigenvalues
+        instead of collapsing to rank-1 (spectral collapse).
+
+        High entropy = diverse eigenvalues = good ✓
+        Low entropy = rank collapse = bad ✗
+
+        Parameters
+        ----------
+        omega_grid : torch.Tensor, shape (M, d)
+            Frequency grid for computing spectral matrix
+
+        Returns
+        -------
+        penalty : torch.Tensor
+            Negative entropy (minimize to maximize diversity)
+        """
+        S = self._compute_spectral_density_matrix(omega_grid)
+
+        # Eigenvalue decomposition
+        eigenvalues = torch.linalg.eigvalsh(S)
+        eigenvalues = torch.clamp(eigenvalues, min=1e-10)  # Numerical stability
+
+        # Normalize to probability distribution
+        probs = eigenvalues / eigenvalues.sum()
+
+        # Shannon entropy: H = -Σ pᵢ log(pᵢ)
+        # Higher entropy = more diverse eigenvalues
+        entropy = -(probs * torch.log(probs + 1e-10)).sum()
+
+        # Normalize by max possible entropy (uniform distribution)
+        max_entropy = torch.log(torch.tensor(len(eigenvalues), dtype=torch.float32))
+        normalized_entropy = entropy / max_entropy
+
+        # Return negative (we minimize loss, but want to maximize entropy)
+        # Also subtract from 1 so penalty is positive when diversity is low
+        return 1.0 - normalized_entropy
+
     def simulate(
         self,
         X_new: torch.Tensor,
@@ -736,6 +820,8 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         noise_var: float = 0.01,
         use_smoothness: bool = False,
         lambda_smooth: float = 0.1,
+        use_diversity: bool = True,
+        lambda_diversity: float = 0.1,
         patience: int = 100,
         use_lowrank: bool = True,
         omega_grid: Optional[torch.Tensor] = None,
@@ -769,7 +855,11 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         use_smoothness : bool
             Enable spectral smoothness penalty (default: False)
         lambda_smooth : float
-            Smoothness regularization weight (ignored if use_smoothness=True)
+            Smoothness regularization weight (ignored if use_smoothness=False)
+        use_diversity : bool
+            Enable spectral diversity penalty to prevent rank collapse (default: True)
+        lambda_diversity : float
+            Diversity regularization weight (default: 0.1)
         patience : int
             Early stopping patience
         use_lowrank : bool
@@ -843,12 +933,22 @@ class FactorizedSpectralDensityNetwork(nn.Module):
                     mc_samples=mc_samples
                 )
 
-            # Smoothness regularization
+            # Regularization
+            loss = data_loss
+
             if use_smoothness:
                 smooth_penalty = self.spectral_smoothness_penalty()
-                loss = data_loss + lambda_smooth * smooth_penalty
-            else:
-                loss = data_loss
+                loss = loss + lambda_smooth * smooth_penalty
+
+            if use_diversity:
+                diversity_penalty = self.spectral_diversity_penalty(omega_grid)
+                loss = loss + lambda_diversity * diversity_penalty
+
+            if torch.isnan(loss):
+                if verbose:
+                    print(f"Warning: Loss is NaN at epoch {epoch}. Skipping update.")
+                optimizer.zero_grad()
+                continue
 
             # Backward pass
             loss.backward()
