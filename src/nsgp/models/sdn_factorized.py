@@ -260,10 +260,92 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         This computes K = LL^T where K = B S^{1/2} (S^{1/2})^T B^T
         - B[i,m] = cos(omega_m x_i) is the cosine basis
         - S[m,n] = s(omega_m, omega_n) \Delta omega^2 is the spectral process kernel
-        - S^{1/2} is the Cholesky decomposition of S
+        - S^{1/2} is the matrix square root of S
 
         The frequency grid should satisfy the constraint: π/Δω ≥ n*Δx
         where Δx is the minimal spatial spacing and n is the number of spatial points.
+
+        ================================================================================
+        📐 MATHEMATICAL JUSTIFICATION - CRITICAL IMPLEMENTATION DETAIL
+        ================================================================================
+
+        1. BIVARIATE FOURIER TRANSFORM (General Case)
+        ──────────────────────────────────────────────────────────────────────────────
+
+        k(x,x') = ∫_{-∞}^{∞} ∫_{-∞}^{∞} s(ω,ω') e^{i(ωx - ω'x')} dω dω'
+
+        For REAL s(ω,ω'), the imaginary part cancels:
+
+        k(x,x') = ∫_{-∞}^{∞} ∫_{-∞}^{∞} s(ω,ω') cos(ωx - ω'x') dω dω'
+
+
+        2. LOW-RANK FACTORIZATION
+        ──────────────────────────────────────────────────────────────────────────────
+
+        We parametrize: s(ω,ω') = f(ω)^T f(ω')
+
+        Then:
+        k(x,x') = ∫∫ f(ω)^T f(ω') cos(ωx) cos(ω'x') dω dω'
+
+               = (∫ f(ω) cos(ωx) dω)^T (∫ f(ω') cos(ω'x') dω')
+
+               = L(x)^T L(x')
+
+        where L(x) = ∫ f(ω) cos(ωx) dω
+
+
+        3. TRAPEZOIDAL RULE APPROXIMATION
+        ──────────────────────────────────────────────────────────────────────────────
+
+        For POSITIVE frequencies ω ∈ [0, Ω]:
+
+        L(x) ≈ Σ_m f(ω_m) cos(ω_m x) Δω
+
+            = B @ F @ Δω
+
+        where:
+          B[i,m] = cos(ω_m x_i)
+          F[m,k] = f_k(ω_m)
+
+        In matrix form with S = F·F^T:
+
+        L = B @ S^(1/2) @ Δω
+
+        Since S is multiplied by (Δω)² during computation (line 323),
+        we get:
+
+        L = B @ (S·Δω²)^(1/2)
+          = B @ S^(1/2)
+
+        NO FACTOR OF 2 NEEDED!
+
+
+        4. WHERE DID THE CONFUSION COME FROM?
+        ──────────────────────────────────────────────────────────────────────────────
+
+        In the STATIONARY case with univariate S(ω):
+
+        k(τ) = ∫_{-∞}^{∞} S(ω) cos(ωτ) dω
+
+        If S(ω) = S(-ω) (symmetric), we can write:
+
+        k(τ) = 2 ∫_0^{∞} S(ω) cos(ωτ) dω  ← Factor of 2 here!
+
+        BUT: This is for STATIONARY kernels with S(ω) univariate!
+
+        For NON-STATIONARY with BIVARIATE s(ω,ω'), there is NO such
+        simple symmetry that gives a factor of 2!
+
+        The low-rank approximation K = LL^T automatically accounts
+        for the correct scaling when we use:
+
+          L = B @ S^(1/2)  ✅
+
+        NOT:
+
+          L = 2 @ B @ S^(1/2)  ❌ (This gives factor of 4 in K!)
+
+        ================================================================================
 
         Parameters
         ----------
