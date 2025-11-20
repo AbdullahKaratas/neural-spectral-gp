@@ -383,8 +383,17 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         r = L.shape[1]
 
         # Input validation
+        MIN_SIGMA2 = 1e-8  # Numerical stability threshold
+
         if sigma2 <= 0:
             raise ValueError(f"sigma2 must be positive, got {sigma2}")
+
+        if sigma2 < MIN_SIGMA2:
+            raise ValueError(
+                f"sigma2={sigma2:.2e} is too small for numerical stability. "
+                f"Minimum allowed: {MIN_SIGMA2:.2e}. "
+                f"Division by sigma2 would cause overflow (1/sigma2={1/sigma2:.2e})."
+            )
 
         if y.shape[0] != n:
             raise ValueError(f"Shape mismatch: L has {n} rows but y has {y.shape[0]} elements")
@@ -636,6 +645,18 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         loss : torch.Tensor
             Negative log marginal likelihood
         """
+        # Input validation
+        MIN_NOISE_VAR = 1e-8  # Numerical stability threshold
+
+        if noise_var <= 0:
+            raise ValueError(f"noise_var must be positive, got {noise_var}")
+
+        if noise_var < MIN_NOISE_VAR:
+            raise ValueError(
+                f"noise_var={noise_var:.2e} is too small for numerical stability. "
+                f"Minimum allowed: {MIN_NOISE_VAR:.2e}"
+            )
+
         # Compute covariance - HYBRID!
         if use_mc:
             # Fast MC for training
