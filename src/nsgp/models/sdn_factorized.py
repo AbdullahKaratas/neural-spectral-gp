@@ -310,6 +310,25 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         # This is more stable than Cholesky for spectral matrices
         eigenvalues, eigenvectors = torch.linalg.eigh(S)
 
+        # Check for problematic eigenvalues before clamping
+        negative_count = (eigenvalues < 0).sum().item()
+
+        if negative_count > 0:
+            max_negative = eigenvalues[eigenvalues < 0].min().item()
+
+            if abs(max_negative) > 1e-6:  # Significant negative eigenvalue
+                raise ValueError(
+                    f"Spectral density matrix has {negative_count} significantly negative eigenvalues "
+                    f"(worst: {max_negative:.2e}). This indicates a bug in the factorization - "
+                    f"S = f @ f.T should be PSD by construction."
+                )
+            else:  # Small numerical errors only
+                import warnings
+                warnings.warn(
+                    f"Clamped {negative_count} small negative eigenvalues (worst: {max_negative:.2e}). "
+                    f"This is likely due to numerical precision."
+                )
+
         # Clamp negative eigenvalues (from numerical errors) to small positive value
         eigenvalues = torch.clamp(eigenvalues, min=1e-10)
 
@@ -492,7 +511,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
                 K_row.append(k_ij)
             K_rows.append(torch.stack(K_row))
 
-        K = torch.stack(K_rows) * volume / fourier_norm  # (n1, n2) - fully differentiable!
+        K = torch.stack(K_rows) * volume  # (n1, n2) - fully differentiable!
 
         if add_noise:
             # Enforce symmetry: K should equal K^T but numerical errors can cause small asymmetry
