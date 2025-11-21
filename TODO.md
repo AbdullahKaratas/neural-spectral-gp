@@ -1,6 +1,6 @@
 # 🔥 KOMPROMISSLOS: NEURIPS 2026 MAIN CONFERENCE
 
-**Last Updated:** November 14, 2025
+**Last Updated:** November 19, 2025
 **Target:** NeurIPS 2026 Main Conference (Top 25%)
 **Strategy:** Option B - Full Paper (NO COMPROMISES)
 **Timeline:** 4-6 Weeks of Intensive Work
@@ -203,6 +203,91 @@ Remes 2017 & 38\% & 145\% & 165\% & ✗ (fails) & ✗ (3/10) \\
 - Sampling success rate (X/10 successful)
 - Training stability (did optimization crash?)
 - Runtime comparison
+
+---
+
+# 🔧 IMPLEMENTATION IMPROVEMENTS
+
+## TODO: Simplify Training
+
+**Current Problem:**
+- Training uses CosineAnnealingWarmRestarts scheduler + early stopping with model restoration and smoothness penalty
+- This approach is overly complex, start with simple training is maybe better for PoC
+
+**Issue:**
+- Scheduler causes learning rate to cycle, leading to instability
+
+**Recommendation:**
+- Use plain Adam
+- Remove smoothness penalty (always enabled currently, adds computational cost with no clear benefit)
+
+**Action Items:**
+- [ ] Remove scheduler from fit() method
+- [ ] Remove or make optional the early stopping restoration
+- [ ] Remove or test smoothness penalty benefits
+- [ ] Test on all synthetic kernels to verify improvement
+- [ ] Update documentation to reflect simplified training approach
+
+## TODO: Add Learnable Kernel Scaling Parameter
+
+**Motivation:**
+- Current kernel scale is determined implicitly by network weights
+- Often results in scale mismatch (learned variance 28-46% of empirical variance)
+- Manual post-hoc scaling could work but not elegant
+
+**Proposal:**
+Add learnable scaling parameter θ to the covariance:
+```
+K = θ * LL^T
+```
+
+**Implementation:**
+```python
+# In __init__:
+self.log_scale = nn.Parameter(torch.tensor(0.0))  # θ = exp(log_scale)
+
+# In compute_lowrank_features:
+L = 2.0 * B @ S_sqrt
+L = L * torch.exp(0.5 * self.log_scale)  # Scale features by √θ
+
+# In compute_covariance_deterministic:
+K = ... (current computation)
+K = K * torch.exp(self.log_scale)  # Scale final kernel by θ
+```
+
+**Benefits:**
+- Network learns correlation structure
+- Scaling parameter learns overall amplitude
+- Separates two aspects of kernel learning
+- Should improve scale matching
+
+**Testing:**
+- [ ] Implement learnable log_scale parameter
+- [ ] Test on all synthetic kernels
+- [ ] Compare variance matching before/after
+
+## TODO: Add Low-Rank Kernel Evaluation
+
+**Current Problem:**
+- `compute_covariance_deterministic(...)` computes K by integral approx.
+- Low-rank features L can be used to compute the approximated K for better interpretation
+- **Frequency grid inconsistency**: Low-rank training uses [0, omega_max] but `compute_covariance_deterministic()` uses [-omega_max/2, omega_max/2] (line 540)
+
+**Current Workaround:**
+- Using `compute_covariance_deterministic` for kernel evaluation
+- Expensive: O(n²M²) double integration over frequency domain
+- Works correctly but slow for large datasets
+- No relation between training and evaluation
+- Frequency grids differ between training and evaluation
+
+**Proposed Fix:**
+Need to properly calibrate the low-rank approximation K = LL^T to match the deterministic integration
+
+**Testing:**
+- [ ] Fix frequency grid inconsistency (standardize to either [0, omega_max] or [-omega_max/2, omega_max/2])
+- [ ] Determine K = LL^T
+- [ ] Verify numerical equivalence with deterministic method
+- [ ] Update test scripts to use low-rank evaluation
 
 ---
 
