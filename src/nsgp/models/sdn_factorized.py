@@ -257,8 +257,26 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         - S[m,n] = s(omega_m, omega_n) \Delta omega^2 is the spectral process kernel
         - S^{1/2} is the matrix square root of S
 
-        The frequency grid should satisfy the constraint: π/Δω ≥ n*Δx
-        where Δx is the minimal spatial spacing and n is the number of spatial points.
+        Frequency Grid Constraint (Periodicity Condition)
+        --------------------------------------------------
+        The low-rank kernel approximation introduces periodicity with spatial
+        period 2 pi/Delta omega. To avoid artifacts from periodic repetition within the
+        spatial domain, the frequency grid spacing Δω must satisfy:
+
+            2 pi/Delta omega >= L
+
+        where L is the spatial domain extent. For n discrete points with
+        minimal spacing Δx, we approximate L = n Delta x, giving:
+
+            2 pi/Delta omega ≥ n Delta x
+
+        Implementation uses more conservative constraint:
+
+            pi/Delta omega ≥ n Delta x  (factor 2 safety margin)
+
+        Physical interpretation:
+        - Kernel is periodic with period 2π/Δω in each argument
+        - Conservative constraint ensures robust approximation quality
 
         ================================================================================
         📐 MATHEMATICAL JUSTIFICATION - CRITICAL IMPLEMENTATION DETAIL
@@ -403,6 +421,25 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         # This is more stable than Cholesky for spectral matrices
         eigenvalues, eigenvectors = torch.linalg.eigh(S)
 
+        # Check for problematic eigenvalues before clamping
+        negative_count = (eigenvalues < 0).sum().item()
+
+        if negative_count > 0:
+            max_negative = eigenvalues[eigenvalues < 0].min().item()
+
+            if abs(max_negative) > 1e-6:  # Significant negative eigenvalue
+                raise ValueError(
+                    f"Spectral density matrix has {negative_count} significantly negative eigenvalues "
+                    f"(worst: {max_negative:.2e}). This indicates a bug in the factorization - "
+                    f"S = f @ f.T should be PSD by construction."
+                )
+            else:  # Small numerical errors only
+                import warnings
+                warnings.warn(
+                    f"Clamped {negative_count} small negative eigenvalues (worst: {max_negative:.2e}). "
+                    f"This is likely due to numerical precision."
+                )
+
         # Clamp negative eigenvalues (from numerical errors) to small positive value
         eigenvalues = torch.clamp(eigenvalues, min=1e-10)
 
@@ -494,8 +531,17 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         r = L.shape[1]
 
         # Input validation
+        MIN_SIGMA2 = 1e-8  # Numerical stability threshold
+
         if sigma2 <= 0:
             raise ValueError(f"sigma2 must be positive, got {sigma2}")
+
+        if sigma2 < MIN_SIGMA2:
+            raise ValueError(
+                f"sigma2={sigma2:.2e} is too small for numerical stability. "
+                f"Minimum allowed: {MIN_SIGMA2:.2e}. "
+                f"Division by sigma2 would cause overflow (1/sigma2={1/sigma2:.2e})."
+            )
 
         if y.shape[0] != n:
             raise ValueError(f"Shape mismatch: L has {n} rows but y has {y.shape[0]} elements")
@@ -600,8 +646,8 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         S_full = self._compute_spectral_density_matrix(omegas)  # (n_samples, n_samples)
 
         # Monte Carlo integration weights
-        dw_mc = self.omega_max / n_samples
-        volume = dw_mc ** 2
+        dw_mc = self.omega_max / n_samples  # Per-dimension weight
+        volume = dw_mc * dw_mc  # 2D integration volume
 
         # Compute phase differences: ω·x_i - ω'·x_j
         # omega_X1: (n_samples, n1), omega_X2: (n_samples, n2)
@@ -783,6 +829,18 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         loss : torch.Tensor
             Negative log marginal likelihood
         """
+        # Input validation
+        MIN_NOISE_VAR = 1e-8  # Numerical stability threshold
+
+        if noise_var <= 0:
+            raise ValueError(f"noise_var must be positive, got {noise_var}")
+
+        if noise_var < MIN_NOISE_VAR:
+            raise ValueError(
+                f"noise_var={noise_var:.2e} is too small for numerical stability. "
+                f"Minimum allowed: {MIN_NOISE_VAR:.2e}"
+            )
+
         # Compute covariance - HYBRID!
         if use_mc:
             # Fast MC for training
