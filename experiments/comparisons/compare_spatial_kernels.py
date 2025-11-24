@@ -127,16 +127,24 @@ def compare_kernels(
                 "--epochs", str(epochs)
             ]
             
-            subprocess.run(cmd, check=True, capture_output=True)
-            
+            result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+
+            # Verify output file was created
+            if not output_path.exists():
+                raise FileNotFoundError(f"Remes baseline did not create output file: {output_path}")
+
             K_remes = torch.tensor(np.load(output_path))
             results['Remes'] = K_remes
-            
-    except (subprocess.CalledProcessError, FileNotFoundError) as e:
-        print(f"Failed to run Remes baseline: {e}")
-        if isinstance(e, subprocess.CalledProcessError):
-             print(f"Stdout: {e.stdout.decode()}")
-             print(f"Stderr: {e.stderr.decode()}")
+
+    except subprocess.CalledProcessError as e:
+        print(f"❌ Failed to run Remes baseline (exit code {e.returncode}): {e}")
+        print(f"Command: {' '.join(cmd)}")
+        if e.stdout:
+            print(f"Stdout: {e.stdout}")
+        if e.stderr:
+            print(f"Stderr: {e.stderr}")
+    except FileNotFoundError as e:
+        print(f"❌ Remes baseline file not found: {e}")
         # Fallback to internal implementation or zeros
         print("Falling back to internal implementation...")
         remes = RemesNeuralSpectralKernel(input_dim=1, hidden_dims=[32, 32])

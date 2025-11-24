@@ -1,0 +1,3 @@
+[submodule "experiments/baselines/nssm-gp"]
+	path = experiments/baselines/nssm-gp
+	url = https://github.com/sremes/nssm-gp.git

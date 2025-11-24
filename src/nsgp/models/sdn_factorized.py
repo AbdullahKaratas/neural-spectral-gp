@@ -90,10 +90,6 @@ class FactorizedSpectralDensityNetwork(nn.Module):
 
         # Initialize with Xavier (better than std=0.01)
         self._init_weights()
-        
-        for name, param in self.named_parameters():
-            if torch.isnan(param).any():
-                print(f"PARAM {name} HAS NaNs AFTER INIT!")
 
     def _init_weights(self):
         """Initialize with Xavier uniform for stable training."""
@@ -428,15 +424,15 @@ class FactorizedSpectralDensityNetwork(nn.Module):
 
         # Compute low-rank features: L = B @ S^{1/2}
         # S already includes (Δω)² scaling, no additional factor needed
+        #
+        # CRITICAL: NO factor of 2 is used here!
+        # Factor of 2 is ONLY for stationary case with symmetric f(ω) = f(-ω).
+        # Our implementation defines f(ω) only for ω ≥ 0, so NO symmetry factor.
+        # See docstring (lines 268-348) for complete mathematical justification.
         L = B @ S_sqrt  # (n, num_freqs)
-        
+
         # Apply learnable scale: L_scaled = sqrt(theta) * L
         L = L * torch.exp(0.5 * self.log_scale)
-
-        if torch.isnan(L).any() or L.abs().max() > 10.0:
-             print(f"L explosion! Max: {L.abs().max()}")
-             print(f"S max: {S.max()}, S_sqrt max: {S_sqrt.max()}")
-             print(f"log_scale: {self.log_scale.item()}")
 
         return L
 
