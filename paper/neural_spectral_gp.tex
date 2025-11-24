@@ -115,6 +115,32 @@ We minimize the negative log marginal likelihood (NLML) plus regularization:
 \mathcal{L} = \mathcal{L}_{\text{NLL}} + \lambda_{\text{smooth}} \E[\|\nabla f\|^2] + \lambda_{\text{diversity}} (1 - H(\text{eig}(S))).
 \end{equation}
 
+\begin{algorithm}[t]
+\caption{Training F-SDN (Deterministic Regime for $d \leq 2$)}
+\label{alg:training}
+\begin{algorithmic}[1]
+\STATE \textbf{Input:} Data $\{(x_i, y_i)\}_{i=1}^n$, rank $r$, grid size $M$, learning rate $\eta$
+\STATE \textbf{Initialize:} Neural network $f_\theta: \R^d \to \R^r$ (Xavier init)
+\STATE \textbf{Precompute:} Fixed frequency grid $\{\omega_m\}_{m=1}^M \subset [0, \Omega]^d$
+\WHILE{not converged}
+    \STATE \textbf{1. Spectral Features (Implicit Scaling)}
+    \STATE \quad Compute features: $v_{mi} \leftarrow f_\theta(\omega_m)_i$ \quad \textcolor{gray}{// Network learns magnitude}
+    \STATE \quad Construct spectral matrix: $S \leftarrow V V^\top$ \quad \textcolor{gray}{// Guaranteed PSD}
+
+    \STATE \textbf{2. Covariance Synthesis}
+    \STATE \quad Compute cosine basis $B$ on grid $\omega$ and inputs $x$
+    \STATE \quad $K \leftarrow B \cdot S \cdot B^\top \cdot \Delta\omega^2$ \quad \textcolor{gray}{// Trapezoidal rule}
+    \STATE \quad $K \leftarrow K + \sigma^2 I$
+
+    \STATE \textbf{3. Optimization}
+    \STATE \quad $L \leftarrow \text{Cholesky}(K)$ \quad \textcolor{gray}{// Never fails}
+    \STATE \quad $\mathcal{L}_{\text{NLL}} \leftarrow \frac{1}{2}y^\top K^{-1} y + \sum \log L_{ii}$
+    \STATE \quad $\mathcal{L}_{\text{reg}} \leftarrow \lambda_{\text{div}} (1 - H(\text{eig}(S))) + \lambda_{\text{smooth}} \|\nabla_\omega f\|^2$
+    \STATE \quad Update $\theta \leftarrow \theta - \eta \nabla_\theta (\mathcal{L}_{\text{NLL}} + \mathcal{L}_{\text{reg}})$
+\ENDWHILE
+\end{algorithmic}
+\end{algorithm}
+
 \section{Theory}
 \label{sec:theory}
 
