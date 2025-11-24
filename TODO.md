@@ -26,6 +26,16 @@
 
 ### 📝 Latest Updates (November 24, 2025) - BREAKTHROUGH!
 
+**LaTeX Compilation Fixes (Paper Ready for Build)**
+- **Issue:** Unescaped ampersand characters in section titles causing LaTeX errors
+- **Fixed Locations:**
+  - Line 106: `\subsection{Covariance Computation \& Training}`
+  - Line 149: `\subsection{Setup \& Results}`
+  - Line 211: `\section{Discussion \& Conclusion}`
+  - Line 224: `\textbf{Rank \& Grid.}`
+- **Result:** Paper compiles cleanly (4 pages, 204 KB PDF) with zero errors ✅
+- **Status:** Ready for git push after TODO.md update
+
 **Bug #5: Missing sin-basis (Addition Theorem Incomplete) 🔥 CRITICAL!**
 - **Discovery:** Original implementation only used cos(ωx)cos(ω'x'), missing sin(ωx)sin(ω'x') term!
 - **Root Cause:** Addition theorem: cos(ωx - ω'x') = cos(ωx)cos(ω'x') + sin(ωx)sin(ω'x')
