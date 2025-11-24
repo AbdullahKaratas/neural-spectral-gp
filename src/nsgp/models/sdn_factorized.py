@@ -419,9 +419,11 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         B_cos = torch.cos(phases)  # (n, num_freqs)
         B_sin = torch.sin(phases)  # (n, num_freqs)
 
-        # Correction for zero-th element (omega = 0)
-        # At ω=0: cos(0) = 1, sin(0) = 0
-        # We use 0.5 for cos to account for integration from -∞ to ∞ → [0, ∞)
+        # Correction for zero frequency (Trapezoidal rule boundary)
+        # At ω=0, the weight should be 0.5 * dω (trapezoidal rule for boundary points).
+        # Since K ~ L*L^T, multiplying B by 0.5 results in 0.25 weight for the (0,0) corner term in 2D integration.
+        # This helps the network learn a smooth f(ω) without needing to learn a discontinuity at 0.
+        # Note: We don't apply 0.5 at ω_max because spectral density → 0 there (negligible contribution).
         omega_norms = torch.norm(omega_grid, dim=1)  # (num_freqs,)
         is_zero = omega_norms < 1e-10
         if torch.any(is_zero):
