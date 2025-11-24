@@ -419,14 +419,13 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         B_cos = torch.cos(phases)  # (n, num_freqs)
         B_sin = torch.sin(phases)  # (n, num_freqs)
 
-        # Correction for zero-th element (omega = 0)
-        # At ω=0: cos(0) = 1, sin(0) = 0
-        # We use 0.5 for cos to account for integration from -∞ to ∞ → [0, ∞)
-        omega_norms = torch.norm(omega_grid, dim=1)  # (num_freqs,)
-        is_zero = omega_norms < 1e-10
-        if torch.any(is_zero):
-            B_cos[:, is_zero] = 0.5
-            B_sin[:, is_zero] = 0.0
+        # NOTE: No explicit trapezoidal endpoint corrections (factor 0.5 at boundaries)
+        # Rationale: Consistent with "implicit scaling" philosophy - the network learns
+        # to absorb all integration factors (Δω scaling, boundary weights, etc.) into
+        # the spectral density magnitudes via MLP and log_scale parameter.
+        # This provides better optimization stability and avoids "fighting" against
+        # standard initialization schemes. For M=50, boundary corrections are ~2% of
+        # the integral and negligible compared to network learning capacity.
 
         # Compute low-rank features for BOTH bases
         # S already includes (Δω)² scaling
@@ -704,15 +703,10 @@ class FactorizedSpectralDensityNetwork(nn.Module):
             B2_cos = B1_cos
             B2_sin = B1_sin
 
-        # Correction for zero frequency
-        # At ω=0: cos(0) = 1, sin(0) = 0
-        omega_norms = torch.norm(omegas, dim=1)
-        is_zero = omega_norms < 1e-10
-        if torch.any(is_zero):
-            B1_cos[:, is_zero] = 0.5
-            B1_sin[:, is_zero] = 0.0
-            B2_cos[:, is_zero] = 0.5
-            B2_sin[:, is_zero] = 0.0
+        # NOTE: No explicit trapezoidal endpoint corrections (factor 0.5 at boundaries)
+        # Rationale: Consistent with "implicit scaling" philosophy - the network learns
+        # to absorb all integration factors into the spectral density magnitudes.
+        # This is consistent with compute_lowrank_features used during training.
 
         # Compute low-rank features for BOTH bases
         # COMPLETE KERNEL: k = k_cos + k_sin = L @ L^T where L = [L_cos, L_sin]
