@@ -257,108 +257,20 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         - S[m,n] = s(omega_m, omega_n) \Delta omega^2 is the spectral process kernel
         - S^{1/2} is the matrix square root of S
 
-        Frequency Grid Constraint (Periodicity Condition)
-        --------------------------------------------------
-        The low-rank kernel approximation introduces periodicity with spatial
-        period 2 pi/Delta omega. To avoid artifacts from periodic repetition within the
-        spatial domain, the frequency grid spacing Δω must satisfy:
+        Mathematical Background
+        -----------------------
+        Computes K = LL^T via bivariate spectral representation:
+            k(x,x') = ∫∫ s(ω,ω') cos(ωx - ω'x') dω dω'
 
-            2 pi/Delta omega >= L
+        With low-rank factorization s(ω,ω') = f(ω)^T f(ω'), this becomes:
+            L = B @ S^{1/2}  where B[i,m] = cos(ω_m x_i), S = F F^T
 
-        where L is the spatial domain extent. For n discrete points with
-        minimal spacing Δx, we approximate L = n Delta x, giving:
+        See paper Section 3 for full mathematical derivation.
 
-            2 pi/Delta omega ≥ n Delta x
-
-        Implementation uses more conservative constraint:
-
-            pi/Delta omega ≥ n Delta x  (factor 2 safety margin)
-
-        Physical interpretation:
-        - Kernel is periodic with period 2π/Δω in each argument
-        - Conservative constraint ensures robust approximation quality
-
-        ================================================================================
-        📐 MATHEMATICAL JUSTIFICATION - CRITICAL IMPLEMENTATION DETAIL
-        ================================================================================
-
-        1. BIVARIATE FOURIER TRANSFORM (General Case)
-        ──────────────────────────────────────────────────────────────────────────────
-
-        k(x,x') = ∫_{-∞}^{∞} ∫_{-∞}^{∞} s(ω,ω') e^{i(ωx - ω'x')} dω dω'
-
-        For REAL s(ω,ω'), the imaginary part cancels:
-
-        k(x,x') = ∫_{-∞}^{∞} ∫_{-∞}^{∞} s(ω,ω') cos(ωx - ω'x') dω dω'
-
-
-        2. LOW-RANK FACTORIZATION
-        ──────────────────────────────────────────────────────────────────────────────
-
-        We parametrize: s(ω,ω') = f(ω)^T f(ω')
-
-        Then:
-        k(x,x') = ∫∫ f(ω)^T f(ω') cos(ωx) cos(ω'x') dω dω'
-
-               = (∫ f(ω) cos(ωx) dω)^T (∫ f(ω') cos(ω'x') dω')
-
-               = L(x)^T L(x')
-
-        where L(x) = ∫ f(ω) cos(ωx) dω
-
-
-        3. TRAPEZOIDAL RULE APPROXIMATION
-        ──────────────────────────────────────────────────────────────────────────────
-
-        For POSITIVE frequencies ω ∈ [0, Ω]:
-
-        L(x) ≈ Σ_m f(ω_m) cos(ω_m x) Δω
-
-            = B @ F @ Δω
-
-        where:
-          B[i,m] = cos(ω_m x_i)
-          F[m,k] = f_k(ω_m)
-
-        In matrix form with S = F·F^T:
-
-        L = B @ S^(1/2) @ Δω
-
-        Since S is multiplied by (Δω)² during computation (line 323),
-        we get:
-
-        L = B @ (S·Δω²)^(1/2)
-          = B @ S^(1/2)
-
-        NO FACTOR OF 2 NEEDED!
-
-
-        4. WHERE DID THE CONFUSION COME FROM?
-        ──────────────────────────────────────────────────────────────────────────────
-
-        In the STATIONARY case with univariate S(ω):
-
-        k(τ) = ∫_{-∞}^{∞} S(ω) cos(ωτ) dω
-
-        If S(ω) = S(-ω) (symmetric), we can write:
-
-        k(τ) = 2 ∫_0^{∞} S(ω) cos(ωτ) dω  ← Factor of 2 here!
-
-        BUT: This is for STATIONARY kernels with S(ω) univariate!
-
-        For NON-STATIONARY with BIVARIATE s(ω,ω'), there is NO such
-        simple symmetry that gives a factor of 2!
-
-        The low-rank approximation K = LL^T automatically accounts
-        for the correct scaling when we use:
-
-          L = B @ S^(1/2)  ✅
-
-        NOT:
-
-          L = 2 @ B @ S^(1/2)  ❌ (This gives factor of 4 in K!)
-
-        ================================================================================
+        Frequency Grid Constraint
+        -------------------------
+        Grid spacing Δω must satisfy: π/Δω ≥ n·Δx (conservative bound)
+        to avoid periodicity artifacts. See paper for details.
 
         Parameters
         ----------
@@ -670,8 +582,8 @@ class FactorizedSpectralDensityNetwork(nn.Module):
                 k_ij = torch.sum(S_full * torch.cos(phases))
                 K[i, j] = volume * k_ij  # NO factor 4 - network learns implicit scaling
 
-        # Apply learnable scale
-        K = K * torch.exp(self.log_scale)
+        # Apply learnable scale (inplace for memory efficiency)
+        K *= torch.exp(self.log_scale)
 
         if add_noise:
             # Enforce symmetry: K should equal K^T but numerical errors can cause small asymmetry

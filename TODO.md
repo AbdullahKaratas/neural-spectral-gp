@@ -36,11 +36,11 @@
 - **Result:** Paper compiles cleanly (4 pages, 204 KB PDF) with zero errors ✅
 - **Status:** Ready for git push after TODO.md update
 
-**Bug #5: Missing sin-basis (Addition Theorem Incomplete) 🔥 CRITICAL!**
-- **Discovery:** Original implementation only used cos(ωx)cos(ω'x'), missing sin(ωx)sin(ω'x') term!
+**Bug #5: Missing sin-basis (Addition Theorem)**
+- **Discovery:** Original implementation only used cos(ωx)cos(ω'x'), missing sin(ωx)sin(ω'x') term
 - **Root Cause:** Addition theorem: cos(ωx - ω'x') = cos(ωx)cos(ω'x') + sin(ωx)sin(ω'x')
-  - We had only the first term → incomplete representation!
-  - This is why factor-2 approach failed previously
+  - We had only the first term → incomplete representation
+  - Empirically, adding sin-basis improved performance on Silverman benchmark
 - **Fix:** Implemented BOTH cos and sin bases in all three methods:
   - `B_cos = torch.cos(phases)` and `B_sin = torch.sin(phases)`
   - `L = torch.cat([L_cos, L_sin], dim=1)` (doubles feature dimension)
@@ -56,15 +56,14 @@
   - RBF: 450.22%
   - Nearly competitive with Standard GP!
 
-**Decision: Follow the Gradient (Empirical Optimization)**
-- **Key Insight:** "Der Gradient hat immer Recht" - Trust empirical data!
+**Decision: Empirical Optimization**
+- **Observation:** On Silverman benchmark, implicit scaling (99%) outperformed explicit factor (373%)
+- **Caveat:** This is based on ONE dataset with ONE kernel - needs validation on more benchmarks
 - **Identification Ambiguity:** Network can learn s(ω,ω') OR s̃(ω,ω') ≈ 4·s(ω,ω')
   - Both yield same covariance K
-  - Implicit scaling provides better optimization landscape
-  - Hard-coded factors fight against initialization schemes
-- **Final Solution:** Complete cos+sin basis WITHOUT explicit factor 2
-  - Let network learn scaling implicitly via MLP and log_scale
-  - Better stability: 99% error vs 373% with explicit factor
+  - Implicit scaling may provide better optimization landscape
+- **Current Solution:** Complete cos+sin basis WITHOUT explicit factor 2
+  - Network learns scaling via MLP and log_scale parameter
 
 **Method Consistency Verified:**
 - Low-Rank / Deterministic: 1.0000 (perfect agreement!)
@@ -163,11 +162,8 @@ def spectral_diversity_penalty(self, omega_grid: torch.Tensor) -> torch.Tensor:
 
 **Hyperparameter Tuning:**
 - Tested λ ∈ {0.1, 0.5, 1.0, 5.0}
-- **Optimal: λ = 0.5**
-  - λ=0.1: 1127% error, negative K values ❌
-  - **λ=0.5: 54.4% error, positive K values ✓** (in isolation)
-  - λ=1.0: 514% error (over-regularized)
-  - λ=5.0: 500% error (over-regularized)
+- **Current: λ = 0.1** (default in code)
+- Note: Tuning was done before Bug #5 fix - needs re-validation on current implementation
 
 **Result:**
 - Effective rank improved: 1.01 → 1.67
@@ -177,62 +173,10 @@ def spectral_diversity_penalty(self, omega_grid: torch.Tensor) -> torch.Tensor:
 
 ---
 
-#### Bug 4: Factor-of-4 Scaling Error in Low-Rank Formula 🔥🔥🔥 CRITICAL!
-**Discovery:** November 20, 2025 - After fixing Bugs 1-3, scale was still 3.87× too large
-**Location:** Lines 349, 608-609 in `src/nsgp/models/sdn_factorized.py`
-
-**What Happened:**
-- Low-rank formula used: `L = 2.0 * B @ S_sqrt`
-- When computing K = L·L^T, this gives: K = 4·B·S·B^T
-- Factor of 4 = (2)² from squaring!
-- Result: Kernel was **3.87× too large** (close to 4x as expected)
-
-**Root Cause:**
-- Confusion from STATIONARY case where factor of 2 is needed
-- For univariate S(ω): `k(τ) = 2∫₀^∞ S(ω)cos(ωτ)dω` (symmetry)
-- But for BIVARIATE s(ω,ω'), no such factor needed!
-- The spectral density matrix S **already includes (Δω)² scaling**
-- Adding 2.0 multiplier caused 4× overcounting in K = L·L^T
-
-**Mathematical Explanation:**
-```
-Correct: k(x,x') = ∫∫ s(ω,ω') cos(ωx)cos(ω'x') dω dω'
-                 = (∫ f(ω)cos(ωx)dω)^T (∫ f(ω')cos(ω'x')dω')
-                 = L^T L  where L = Σ f(ω_m)cos(ω_m x)Δω
-
-With S = F·F^T already scaled by (Δω)²:
-  L = B @ S^(1/2)  ✓ CORRECT
-
-NOT:
-  L = 2.0 * B @ S^(1/2)  ❌ Gives K = 4·B·S·B^T
-```
-
-**Fix:**
-```python
-# Line 349 (compute_lowrank_features):
-BEFORE: L = 2.0 * B @ S_sqrt
-AFTER:  L = B @ S_sqrt  ✓
-
-# Lines 608-609 (compute_covariance_deterministic):
-BEFORE: L1 = 2.0 * B1 @ S_sqrt; L2 = 2.0 * B2 @ S_sqrt
-AFTER:  L1 = B1 @ S_sqrt; L2 = B2 @ S_sqrt  ✓
-```
-
-**Results After Fix:**
-- Error: **269.3% → 20.5%** (248.8% improvement!)
-- Scale: **3.87× → 1.13×** (almost perfect!)
-- **NOW BEATS BOTH BASELINES:**
-  - Standard GP: 82%
-  - Remes 2017: 174%
-  - F-SDN (fixed): **20.5%** ✅
-
-**Impact:** 🚀 **GAME CHANGER!**
-- This was the MAIN bug blocking competitive performance
-- Structure learning was already correct (8.7% error after rescaling)
-- Just needed correct scaling factor
-- F-SDN now demonstrates clear advantage over baselines!
-
-**Lesson:** Always verify Fourier transform scaling factors from first principles. Stationary and non-stationary cases have different symmetry properties!
+#### ~~Bug 4: Factor-of-2 Scaling~~ (SUPERSEDED by Bug #5)
+**Note:** This bug was initially identified but later superseded by Bug #5 (complete cos+sin basis).
+The decision to use implicit scaling (no explicit factor) was made based on empirical optimization.
+See Bug #5 and "Empirical Optimization" section above for the final approach.
 
 ---
 
@@ -389,7 +333,7 @@ After implementing complete cos+sin basis, we tested:
 - Hidden dims: [64, 64]
 - Features: M=40
 - Omega max: 10.0
-- **Diversity regularization: λ=0.5** ✓
+- **Diversity regularization: λ=0.1** (default)
 - **Bug #4 fixed:** Removed factor-of-4 scaling error
 - **Bug #5 fixed:** Complete cos+sin basis (addition theorem)
 
@@ -430,7 +374,7 @@ After implementing complete cos+sin basis, we tested:
 - **F-SDN now in same ballpark as Standard GP baseline** ✅
 
 **What This Means for NeurIPS 2026:**
-1. ✅ **Novel contribution validated:** PSD guarantee (always works)
+1. ✅ **Novel contribution validated:** Bivariate spectral density modeling with PSD guarantee
 2. ✅ **Mathematical correctness:** Complete addition theorem implementation
 3. ✅ **Method consistency:** Training = Evaluation (all 3 methods agree)
 4. ✅ **Baseline comparisons complete:** Fair comparison shows competitiveness
