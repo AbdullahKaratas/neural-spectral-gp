@@ -133,7 +133,7 @@ def compare_methods_on_kernel(
         np.random.seed(seed)
 
         # Generate training data
-        # Add jitter to ensure ground truth is PSD
+        # Add jitter to ensure ground truth is PD
         K_true_jittered = K_true + 1e-3 * torch.eye(len(X_test))
         L_true = torch.linalg.cholesky(K_true_jittered)
         y_train = (L_true @ torch.randn(len(X_test))).squeeze()
@@ -154,7 +154,7 @@ def compare_methods_on_kernel(
                     use_mc_training=False, verbose=False)
 
             # Evaluate
-            K_fsdn = fsdn.compute_covariance_deterministic(X_test, noise_var=0.0)
+            K_fsdn = fsdn.compute_covariance(X_test)
             k_error_fsdn = torch.norm(K_fsdn - K_true) / torch.norm(K_true)
 
             # Try sampling
