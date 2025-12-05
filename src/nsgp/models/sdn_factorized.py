@@ -319,41 +319,8 @@ class FactorizedSpectralDensityNetwork(nn.Module):
                 f"Consider using at least {int(np.ceil(self.omega_grid.max().item() / (np.pi / constraint_rhs)))+1} frequency points."
             )
 
-        # Compute spectral density matrix S[m,n] = s(omega_m, omega_n)
-        S = self._compute_spectral_density_matrix()  # (num_freqs, num_freqs)
-
-        # Apply principled scaling (in-place to save memory)
-        S *= (spacing ** 2)
-
-        # Compute matrix square root via eigendecomposition
-        # This is more stable than Cholesky for spectral matrices
-        eigenvalues, eigenvectors = torch.linalg.eigh(S)
-
-        # Check for problematic eigenvalues before clamping
-        negative_count = (eigenvalues < 0).sum().item()
-
-        if negative_count > 0:
-            max_negative = eigenvalues[eigenvalues < 0].min().item()
-
-            if abs(max_negative) > 1e-5:  # Significant negative eigenvalue (relaxed for numerical precision)
-                raise ValueError(
-                    f"Spectral density matrix has {negative_count} significantly negative eigenvalues "
-                    f"(worst: {max_negative:.2e}). This indicates a bug in the factorization - "
-                    f"S = f @ f.T should be PSD by construction."
-                )
-            else:  # Small numerical errors only
-                import warnings
-                warnings.warn(
-                    f"Clamped {negative_count} small negative eigenvalues (worst: {max_negative:.2e}). "
-                    f"This is likely due to numerical precision."
-                )
-
-        # Clamp negative eigenvalues (from numerical errors) to small positive value
-        eigenvalues = torch.clamp(eigenvalues, min=1e-10)
-
-        # S_sqrt = Q @ sqrt(Lambda) @ Q^T, but we only need S_sqrt for multiplication
-        # S_sqrt such that S_sqrt @ S_sqrt^T = S
-        S_sqrt = eigenvectors @ torch.diag(torch.sqrt(eigenvalues))
+        # Compute low rank features * spacing
+        S_sqrt = self.compute_features(self.omega_grid) * spacing
 
         # Compute cosine basis
         # X: (n, d), self.omega_grid: (num_freqs, d) -> phases: (n, num_freqs)
