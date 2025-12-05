@@ -1,7 +1,7 @@
 """
 Factorized Spectral Density Network (SDN-F)
 
-This version GUARANTEES positive definiteness by using a low-rank factorization:
+This version guarantees positive semi-definiteness by using a low-rank factorization:
     s(ω, ω') = Σᵢ fᵢ(ω) · fᵢ(ω')
 
 where fᵢ are learned feature functions. This ensures s is positive semi-definite
