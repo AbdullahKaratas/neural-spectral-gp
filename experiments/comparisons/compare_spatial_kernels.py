@@ -97,7 +97,7 @@ def compare_kernels(
     sdn.fit(X_train, y_train, epochs=epochs, lr=1e-3, verbose=True, use_mc_training=False,
             use_diversity=True, lambda_diversity=0.5) # Diversity regularization to prevent rank collapse
     print(f"F-SDN Final Log Scale: {sdn.log_scale.item()}")
-    K_sdn = sdn.compute_covariance_deterministic(X_test, noise_var=0.0)
+    K_sdn = sdn.compute_covariance(X_test)
     results['F-SDN'] = K_sdn
     
     # 3. Remes (Baseline) - Official Code
@@ -143,6 +143,12 @@ def compare_kernels(
             print(f"Stdout: {e.stdout}")
         if e.stderr:
             print(f"Stderr: {e.stderr}")
+        # Fallback to internal implementation
+        print("Falling back to internal implementation...")
+        remes = RemesNeuralSpectralKernel(input_dim=1, hidden_dims=[32, 32])
+        remes.fit(X_train, y_train, epochs=epochs, verbose=False)
+        K_remes, _ = remes.compute_covariance(X_test, noise_var=0.0)
+        results['Remes'] = K_remes
     except FileNotFoundError as e:
         print(f"❌ Remes baseline file not found: {e}")
         # Fallback to internal implementation or zeros
