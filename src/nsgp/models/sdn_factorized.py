@@ -55,7 +55,8 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         omega_max: float = 8.0,
         activation: str = 'elu',
         enforce_symmetry: bool = True,
-        omega_grid: Optional[torch.Tensor] = None
+        omega_grid: Optional[torch.Tensor] = None,
+        complex_measure: bool = False
     ):
         super().__init__()
         self.input_dim = input_dim
@@ -64,6 +65,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         self.n_features = n_features
         self.omega_max = omega_max
         self.enforce_symmetry = enforce_symmetry
+        self.complex_measure = complex_measure
 
         # Frequency grid for low-rank NFF (optional, created if None)
         if omega_grid is None:
@@ -253,7 +255,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         This computes K = LL^T where K = B S^{1/2} (S^{1/2})^T B^T
         - B[i,m] = cos(omega_m x_i) is the cosine basis
         - S[m,n] = s(omega_m, omega_n) \Delta omega^2 is the spectral process kernel
-        - S^{1/2} is the matrix square root of S
+        - F is the low rank spectral matrix
 
         Mathematical Background
         -----------------------
@@ -320,7 +322,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
             )
 
         # Compute low rank features * spacing
-        S_sqrt = self.compute_features(self.omega_grid) * spacing
+        F_low = self.compute_features(self.omega_grid) * spacing
 
         # Compute cosine basis
         # X: (n, d), self.omega_grid: (num_freqs, d) -> phases: (n, num_freqs)
@@ -337,20 +339,29 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         if torch.any(is_zero):
             B_cos[:, is_zero] = 0.5
 
-        # Compute low-rank features
-        # S already includes (Δω)² scaling
-        #
-        # LOW-RANK KERNEL APPROXIMATION:
-        # k(x,x') = ∫∫ s(ω,ω') cos(ωx) cos(ω'x') dω dω'
-        #         ≈ Σ_m Σ_n s(ω_m, ω_n) cos(ω_m x) cos(ω_n x') Δω²
-        #
-        # With s(ω,ω') = f(ω)^T f(ω') and S = FF^T:
-        # k(x,x') ≈ [B @ F @ Δω] @ [B @ F @ Δω]^T
-        #         = [B @ S^{1/2} @ Δω] @ [B @ S^{1/2} @ Δω]^T
-        #         = L @ L^T
-        #
-        # Since S already contains Δω² scaling (line 418), we have:
-        L = B_cos @ S_sqrt  # (n, num_freqs)
+        if self.complex_measure:
+            # Compute the sine basis
+            B_sin = torch.sin(phases)
+            if torch.any(is_zero):
+                B_sin[:, is_zero] = 0
+
+            if torch.is_complex(F_low):
+                Freal = F_low.real
+                Fim = F_low.imag
+                phi_real = B_cos @ Freal - B_sin @ Fim
+                phi_im = B_cos @ Fim + B_sin @ Freal
+            else:
+                # F_low is real-valued, so imaginary part is zero
+                # phi_real = B_cos @ F_low - B_sin @ 0 = B_cos @ F_low
+                # phi_im = B_cos @ 0 + B_sin @ F_low = B_sin @ F_low
+                phi_real = B_cos @ F_low
+                phi_im = B_sin @ F_low
+
+            L = torch.cat([phi_real, phi_im], dim=1)
+        else:
+            # Compute low-rank features
+            # S already includes (Δω)² scaling
+            L = B_cos @ F_low  # (n, num_freqs)
 
         # Apply learnable scale: L_scaled = sqrt(theta) * L
         L *= torch.exp(0.5 * self.log_scale)  # Inplace operation

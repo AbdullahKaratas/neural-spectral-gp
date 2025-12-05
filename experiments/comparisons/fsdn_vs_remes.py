@@ -145,7 +145,8 @@ def compare_methods_on_kernel(
             hidden_dims=[64, 64, 64],
             rank=15,
             n_features=50,
-            omega_max=8.0
+            omega_max=8.0,
+            complex_measure=False
         )
 
         start = time.time()

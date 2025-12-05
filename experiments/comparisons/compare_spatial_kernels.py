@@ -92,7 +92,8 @@ def compare_kernels(
         hidden_dims=[64, 64],
         rank=10,
         n_features=40,
-        omega_max=10.0
+        omega_max=10.0,
+        complex_measure=False
     )
     sdn.fit(X_train, y_train, epochs=epochs, lr=1e-3, verbose=True,
             use_diversity=True, lambda_diversity=0.5)  # Diversity regularization to prevent rank collapse
