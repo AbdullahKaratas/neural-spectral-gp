@@ -54,7 +54,8 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         n_features: int = 50,
         omega_max: float = 8.0,
         activation: str = 'elu',
-        enforce_symmetry: bool = True
+        enforce_symmetry: bool = True,
+        omega_grid: Optional[torch.Tensor] = None
     ):
         super().__init__()
         self.input_dim = input_dim
@@ -63,6 +64,12 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         self.n_features = n_features
         self.omega_max = omega_max
         self.enforce_symmetry = enforce_symmetry
+
+        # Frequency grid for low-rank NFF (optional, created if None)
+        if omega_grid is None:
+            self.omega_grid = torch.linspace(0, omega_max, n_features).unsqueeze(-1)
+        else:
+            self.omega_grid = omega_grid
 
         # Learnable global scale (log variance)
         # Initialize to -2.0 for moderate initial scale (exp(-2) ≈ 0.135)
@@ -194,27 +201,19 @@ class FactorizedSpectralDensityNetwork(nn.Module):
 
         return f
 
-    def _compute_spectral_density_matrix(
-        self,
-        omega_grid: torch.Tensor
-    ) -> torch.Tensor:
+    def _compute_spectral_density_matrix(self) -> torch.Tensor:
         """
         Compute spectral density matrix S[m,n] = s(omega_m, omega_n).
 
         Uses factorized representation: s(omega, omega') = f(omega)^T f(omega')
         This guarantees S is positive semi-definite.
 
-        Parameters
-        ----------
-        omega_grid : torch.Tensor, shape (M, d)
-            Frequency grid points
-
         Returns
         -------
         S : torch.Tensor, shape (M, M)
             Spectral density matrix
         """
-        f = self.compute_features(omega_grid)  # (M, r)
+        f = self.compute_features(self.omega_grid)  # (M, r)
         S = f @ f.T  # (M, M)
         return S
 
@@ -247,7 +246,6 @@ class FactorizedSpectralDensityNetwork(nn.Module):
     def compute_lowrank_features(
         self,
         X: torch.Tensor,
-        omega_grid: torch.Tensor,
     ) -> torch.Tensor:
         r"""
         Compute low-rank feature matrix L using nonstationary Fourier features.
@@ -276,8 +274,6 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         ----------
         X : torch.Tensor, shape (n, d)
             Spatial locations
-        omega_grid : torch.Tensor, shape (num_freqs, d)
-            Frequency grid points (should start from 0 for real spectral density)
 
         Returns
         -------
@@ -288,10 +284,10 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         if not torch.is_floating_point(X):
             raise TypeError(f"X must be floating point tensor, got {X.dtype}")
 
-        if not torch.is_floating_point(omega_grid):
-            raise TypeError(f"omega_grid must be floating point tensor, got {omega_grid.dtype}")
+        if not torch.is_floating_point(self.omega_grid):
+            raise TypeError(f"omega_grid must be floating point tensor, got {self.omega_grid.dtype}")
 
-        num_freqs = omega_grid.shape[0]
+        num_freqs = self.omega_grid.shape[0]
         n_pts = X.shape[0]
 
         # Validate minimum requirements
@@ -312,7 +308,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         spacings = X_sorted[1:] - X_sorted[:-1]
         delta_x = spacings.min().item()
 
-        spacing = torch.norm(omega_grid[1] - omega_grid[0]).item()
+        spacing = torch.norm(self.omega_grid[1] - self.omega_grid[0]).item()
         constraint_lhs = np.pi / spacing
         constraint_rhs = n_pts * delta_x
 
@@ -320,11 +316,11 @@ class FactorizedSpectralDensityNetwork(nn.Module):
             import warnings
             warnings.warn(
                 f"Frequency grid may be too coarse: pi/spacing = {constraint_lhs:.4f} < n*delta_x = {constraint_rhs:.4f}. "
-                f"Consider using at least {int(np.ceil(omega_grid.max().item() / (np.pi / constraint_rhs)))+1} frequency points."
+                f"Consider using at least {int(np.ceil(self.omega_grid.max().item() / (np.pi / constraint_rhs)))+1} frequency points."
             )
 
         # Compute spectral density matrix S[m,n] = s(omega_m, omega_n)
-        S = self._compute_spectral_density_matrix(omega_grid)  # (num_freqs, num_freqs)
+        S = self._compute_spectral_density_matrix()  # (num_freqs, num_freqs)
 
         # Apply principled scaling (in-place to save memory)
         S *= (spacing ** 2)
@@ -360,8 +356,8 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         S_sqrt = eigenvectors @ torch.diag(torch.sqrt(eigenvalues))
 
         # Compute cosine basis
-        # X: (n, d), omega_grid: (num_freqs, d) -> phases: (n, num_freqs)
-        phases = X @ omega_grid.T  # (n, num_freqs)
+        # X: (n, d), self.omega_grid: (num_freqs, d) -> phases: (n, num_freqs)
+        phases = X @ self.omega_grid.T  # (n, num_freqs)
         B_cos = torch.cos(phases)  # (n, num_freqs)
 
         # Correction for zero frequency (Trapezoidal rule boundary)
@@ -369,7 +365,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         # Since K ~ L*L^T, multiplying B by 0.5 results in 0.25 weight for the (0,0) corner term in 2D integration.
         # This helps the network learn a smooth f(ω) without needing to learn a discontinuity at 0.
         # Note: We don't apply 0.5 at ω_max because spectral density → 0 there (negligible contribution).
-        omega_norms = torch.norm(omega_grid, dim=1)  # (num_freqs,)
+        omega_norms = torch.norm(self.omega_grid, dim=1)  # (num_freqs,)
         is_zero = omega_norms < 1e-10
         if torch.any(is_zero):
             B_cos[:, is_zero] = 0.5
@@ -490,19 +486,17 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         X1: torch.Tensor,
         X2: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
-        omegas = torch.linspace(0, self.omega_max, self.n_features).unsqueeze(-1)
-
         if X1.dim() == 1:
             X1 = X1.unsqueeze(-1)
 
-        L1 = self.compute_lowrank_features(X1, omegas)
+        L1 = self.compute_lowrank_features(X1)
 
         if X2 is None:
             return L1 @ L1.T
         else:
             if X2.dim() == 1:
                 X2 = X2.unsqueeze(-1)
-            L2 = self.compute_lowrank_features(X2, omegas)
+            L2 = self.compute_lowrank_features(X2)
 
         return L1 @ L2.T
 
@@ -529,7 +523,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         # L2 norm of gradient
         return torch.mean(grad ** 2)
 
-    def spectral_diversity_penalty(self, omega_grid: torch.Tensor) -> torch.Tensor:
+    def spectral_diversity_penalty(self) -> torch.Tensor:
         """
         Encourage diverse spectral structure (prevent rank collapse).
 
@@ -539,17 +533,12 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         High entropy = diverse eigenvalues = good ✓
         Low entropy = rank collapse = bad ✗
 
-        Parameters
-        ----------
-        omega_grid : torch.Tensor, shape (M, d)
-            Frequency grid for computing spectral matrix
-
         Returns
         -------
         penalty : torch.Tensor
             Negative entropy (minimize to maximize diversity)
         """
-        S = self._compute_spectral_density_matrix(omega_grid)
+        S = self._compute_spectral_density_matrix()
 
         # Eigenvalue decomposition
         eigenvalues = torch.linalg.eigvalsh(S)
@@ -623,7 +612,6 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         use_diversity: bool = True,
         lambda_diversity: float = 0.1,
         patience: int = 100,
-        omega_grid: Optional[torch.Tensor] = None,
         verbose: bool = True
     ) -> List[float]:
         """
@@ -653,8 +641,6 @@ class FactorizedSpectralDensityNetwork(nn.Module):
             Diversity regularization weight (default: 0.1)
         patience : int
             Early stopping patience
-        omega_grid : torch.Tensor, optional
-            Frequency grid (if None, uses linspace from 0 to omega_max)
         verbose : bool
             Print training progress
 
@@ -665,10 +651,6 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         """
         # Zero-mean the data
         y_train = y_train - y_train.mean()
-
-        # Prepare omega grid (needed for both low-rank training and diversity regularization)
-        if omega_grid is None:
-            omega_grid = torch.linspace(0, self.omega_max, self.n_features).unsqueeze(-1)
 
         # Optimizer
         optimizer = torch.optim.Adam(self.parameters(), lr=lr)
@@ -693,14 +675,14 @@ class FactorizedSpectralDensityNetwork(nn.Module):
             print(f"  Epochs: {epochs}")
             print(f"  Initial LR: {lr}")
             print(f"  Method: Low-rank NFF")
-            print(f"  Omega grid: {omega_grid.shape[0]} points from 0 to {self.omega_max}")
+            print(f"  Omega grid: {self.omega_grid.shape[0]} points from 0 to {self.omega_max}")
             print()
 
         for epoch in range(epochs):
             optimizer.zero_grad()
 
             # Compute loss using low-rank NFF
-            L = self.compute_lowrank_features(X_train, omega_grid)
+            L = self.compute_lowrank_features(X_train)
             data_loss = self.log_marginal_likelihood(L, y_train, noise_var)
 
             # Regularization
@@ -711,7 +693,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
                 loss = loss + lambda_smooth * smooth_penalty
 
             if use_diversity:
-                diversity_penalty = self.spectral_diversity_penalty(omega_grid)
+                diversity_penalty = self.spectral_diversity_penalty()
                 loss = loss + lambda_diversity * diversity_penalty
 
             if torch.isnan(loss):
