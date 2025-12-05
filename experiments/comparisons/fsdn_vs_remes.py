@@ -123,8 +123,8 @@ def compare_methods_on_kernel(
     K_true = kernel_fn(X_test, X_test)
 
     results = {
-        'fsdn': {'k_errors': [], 'pd_failures': [], 'sampling_success': [], 'times': []},
-        'remes': {'k_errors': [], 'pd_failures': [], 'sampling_success': [], 'times': []}
+        'fsdn': {'k_errors': [], 'times': []},
+        'remes': {'k_errors': [], 'times': []}
     }
 
     for seed in range(n_seeds):
@@ -151,32 +151,20 @@ def compare_methods_on_kernel(
         start = time.time()
         try:
             fsdn.fit(X_train, y_train, epochs=epochs, lr=1e-2,
-                    use_mc_training=False, verbose=False)
+                    verbose=False, use_diversity=True, lambda_diversity=0.5)
 
             # Evaluate
             K_fsdn = fsdn.compute_covariance(X_test)
             k_error_fsdn = torch.norm(K_fsdn - K_true) / torch.norm(K_true)
 
-            # Try sampling
-            try:
-                _ = fsdn.simulate(X_test, n_samples=10)
-                sampling_success_fsdn = True
-            except:
-                sampling_success_fsdn = False
-
             results['fsdn']['k_errors'].append(k_error_fsdn.item())
-            results['fsdn']['pd_failures'].append(0)  # F-SDN never fails!
-            results['fsdn']['sampling_success'].append(sampling_success_fsdn)
             results['fsdn']['times'].append(time.time() - start)
 
-            print(f"[F-SDN] K-error: {k_error_fsdn.item():.1%} | "
-                  f"Sampling: {'✓' if sampling_success_fsdn else '✗'}")
+            print(f"[F-SDN] K-error: {k_error_fsdn.item():.1%}")
 
         except Exception as e:
             print(f"[F-SDN] FAILED: {e}")
             results['fsdn']['k_errors'].append(np.nan)
-            results['fsdn']['pd_failures'].append(0)
-            results['fsdn']['sampling_success'].append(False)
             results['fsdn']['times'].append(time.time() - start)
 
         # ========== REMES ==========
@@ -189,7 +177,7 @@ def compare_methods_on_kernel(
 
         start = time.time()
         try:
-            losses, n_failures = remes.fit(
+            losses, _ = remes.fit(
                 X_train, y_train, epochs=epochs, lr=1e-2, verbose=False
             )
 
@@ -199,32 +187,18 @@ def compare_methods_on_kernel(
             )
 
             if psd_ok:
-                k_error_remes = torch.norm(K_remes - K_true) / torch.norm(K_true)
+                k_error_remes = (torch.norm(K_remes - K_true) / torch.norm(K_true)).item()
             else:
                 k_error_remes = np.inf
 
-            # Try sampling (Cholesky)
-            try:
-                L = torch.linalg.cholesky(K_remes + 1e-4 * torch.eye(len(X_test)))
-                _ = (L @ torch.randn(len(X_test), 10))
-                sampling_success_remes = True
-            except:
-                sampling_success_remes = False
-
             results['remes']['k_errors'].append(k_error_remes if k_error_remes != np.inf else np.nan)
-            results['remes']['pd_failures'].append(n_failures)
-            results['remes']['sampling_success'].append(sampling_success_remes)
             results['remes']['times'].append(time.time() - start)
 
-            print(f"[Remes] K-error: {k_error_remes if k_error_remes != np.inf else 'FAIL':.1%} | "
-                  f"PD failures: {n_failures} | "
-                  f"Sampling: {'✓' if sampling_success_remes else '✗'}")
+            print(f"[Remes] K-error: {k_error_remes if k_error_remes != np.inf else 'FAIL':.1%}")
 
         except Exception as e:
             print(f"[Remes] FAILED: {e}")
             results['remes']['k_errors'].append(np.nan)
-            results['remes']['pd_failures'].append(9999)
-            results['remes']['sampling_success'].append(False)
             results['remes']['times'].append(time.time() - start)
 
     # Summarize results
@@ -243,14 +217,10 @@ def compare_methods_on_kernel(
             mean_error = np.nan
             std_error = np.nan
 
-        total_failures = sum(results[method]['pd_failures'])
-        success_rate = 100 * sum(results[method]['sampling_success']) / n_seeds
         mean_time = np.mean(results[method]['times'])
 
         print(f"\n{name}:")
         print(f"  K-error: {mean_error:.1%} ± {std_error:.1%}")
-        print(f"  PD failures: {total_failures} total")
-        print(f"  Sampling: {success_rate:.0f}% success")
         print(f"  Time: {mean_time:.1f}s")
 
     return results
@@ -301,7 +271,7 @@ def run_all_comparisons(n_seeds=3, epochs=1000):
     print("FINAL COMPARISON TABLE")
     print("="*80)
     print()
-    print(f"{'Kernel':<30} | {'Method':<10} | {'K-error':<12} | {'PD Fail':<8} | {'Sample':<8}")
+    print(f"{'Kernel':<30} | {'Method':<10} | {'K-error':<15}")
     print("-"*80)
 
     for kernel_name, kernel_label in [
@@ -316,22 +286,14 @@ def run_all_comparisons(n_seeds=3, epochs=1000):
             mean_error = np.mean(k_errors) if len(k_errors) > 0 else np.nan
             std_error = np.std(k_errors) if len(k_errors) > 0 else np.nan
 
-            total_failures = sum(results[method]['pd_failures'])
-            success_rate = 100 * sum(results[method]['sampling_success']) / n_seeds
-
             if not np.isnan(mean_error):
                 error_str = f"{mean_error:.1%}±{std_error:.1%}"
             else:
                 error_str = "FAILED"
 
-            print(f"{kernel_label:<30} | {method_name:<10} | {error_str:<12} | "
-                  f"{total_failures:<8} | {success_rate:.0f}%")
+            print(f"{kernel_label:<30} | {method_name:<10} | {error_str:<15}")
 
     print("="*80)
-    print()
-    print("KEY MESSAGE FOR PAPER:")
-    print("  ✓ F-SDN: ALWAYS PSD (0 failures), reliable sampling")
-    print("  ✗ Remes: Can fail PSD, unreliable sampling")
     print()
 
     return all_results

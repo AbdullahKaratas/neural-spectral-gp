@@ -623,22 +623,13 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         use_diversity: bool = True,
         lambda_diversity: float = 0.1,
         patience: int = 100,
-        use_lowrank: bool = True,
         omega_grid: Optional[torch.Tensor] = None,
-        use_mc_training: bool = True,
-        mc_samples: int = 50,
         verbose: bool = True
     ) -> List[float]:
         """
-        Train the factorized SDN.
+        Train the factorized SDN using low-rank NFF approximation.
 
-        TRAINING METHODS:
-            1. Low-rank NFF approximation (use_lowrank=True, default):
-               Uses log_marginal_likelihood with compute_lowrank_features
-
-            2. Full covariance (use_lowrank=False):
-               Uses posterior_mean_loss with full covariance computation
-               Monte Carlo (use_mc_training=True) or deterministic quadrature
+        Uses log_marginal_likelihood with compute_lowrank_features.
 
         Parameters
         ----------
@@ -662,14 +653,8 @@ class FactorizedSpectralDensityNetwork(nn.Module):
             Diversity regularization weight (default: 0.1)
         patience : int
             Early stopping patience
-        use_lowrank : bool
-            Use low-rank NFF approximation (default: True)
         omega_grid : torch.Tensor, optional
-            Frequency grid for low-rank method (if None, computes arange(0, n_features)*spacing)
-        use_mc_training : bool
-            Use Monte Carlo for full covariance training (ignored if use_lowrank=True)
-        mc_samples : int
-            Number of MC samples during training (ignored if use_lowrank=True)
+            Frequency grid (if None, uses linspace from 0 to omega_max)
         verbose : bool
             Print training progress
 
@@ -707,31 +692,16 @@ class FactorizedSpectralDensityNetwork(nn.Module):
             print(f"  Rank: {self.rank}")
             print(f"  Epochs: {epochs}")
             print(f"  Initial LR: {lr}")
-            if use_lowrank:
-                print(f"  Method: Low-rank NFF")
-                print(f"  Omega grid: {omega_grid.shape[0]} points from 0 to {self.omega_max}")
-            else:
-                print(f"  Method: {'Monte Carlo (fast)' if use_mc_training else 'Deterministic (accurate)'}")
-                if use_mc_training:
-                    print(f"  MC Samples: {mc_samples}")
+            print(f"  Method: Low-rank NFF")
+            print(f"  Omega grid: {omega_grid.shape[0]} points from 0 to {self.omega_max}")
             print()
 
         for epoch in range(epochs):
             optimizer.zero_grad()
 
-            # Compute loss using selected method
-            if use_lowrank:
-                # Low-rank NFF
-                L = self.compute_lowrank_features(X_train, omega_grid)
-                data_loss = self.log_marginal_likelihood(L, y_train, noise_var)
-            else:
-                # Full covariance method
-                data_loss = self.posterior_mean_loss(
-                    X_train, y_train,
-                    noise_var=noise_var,
-                    use_mc=use_mc_training,
-                    mc_samples=mc_samples
-                )
+            # Compute loss using low-rank NFF
+            L = self.compute_lowrank_features(X_train, omega_grid)
+            data_loss = self.log_marginal_likelihood(L, y_train, noise_var)
 
             # Regularization
             loss = data_loss

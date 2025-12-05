@@ -94,8 +94,8 @@ def compare_kernels(
         n_features=40,
         omega_max=10.0
     )
-    sdn.fit(X_train, y_train, epochs=epochs, lr=1e-3, verbose=True, use_mc_training=False,
-            use_diversity=True, lambda_diversity=0.5) # Diversity regularization to prevent rank collapse
+    sdn.fit(X_train, y_train, epochs=epochs, lr=1e-3, verbose=True,
+            use_diversity=True, lambda_diversity=0.5)  # Diversity regularization to prevent rank collapse
     print(f"F-SDN Final Log Scale: {sdn.log_scale.item()}")
     K_sdn = sdn.compute_covariance(X_test)
     results['F-SDN'] = K_sdn
