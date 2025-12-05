@@ -146,7 +146,8 @@ def compare_methods_on_kernel(
             rank=15,
             n_features=50,
             omega_max=8.0,
-            complex_measure=False
+            complex_measure=False,
+            use_even_odd_features=False
         )
 
         start = time.time()

@@ -56,7 +56,8 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         activation: str = 'elu',
         enforce_symmetry: bool = True,
         omega_grid: Optional[torch.Tensor] = None,
-        complex_measure: bool = False
+        complex_measure: bool = False,
+        use_even_odd_features: bool = False
     ):
         super().__init__()
         self.input_dim = input_dim
@@ -65,6 +66,15 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         self.n_features = n_features
         self.omega_max = omega_max
         self.enforce_symmetry = enforce_symmetry
+        self.use_even_odd_features = use_even_odd_features
+
+        # Enforce constraint: even-odd features require complex measures
+        if use_even_odd_features and not complex_measure:
+            raise ValueError(
+                "use_even_odd_features=True requires complex_measure=True. "
+                "The even-odd decomposition pairs odd features with sine (odd function) "
+                "and even features with cosine (even function), which requires complex measures."
+            )
         self.complex_measure = complex_measure
 
         # Frequency grid for low-rank NFF (optional, created if None)
@@ -77,8 +87,36 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         # Initialize to -2.0 for moderate initial scale (exp(-2) ≈ 0.135)
         self.log_scale = nn.Parameter(torch.tensor(-2.0))
 
-        # MLP: ω → feature vector f(ω) ∈ ℝʳ
-        # This is the core of the low-rank factorization
+        if use_even_odd_features:
+            # even-odd decomposition: f(omega) = [g(omega), h(omega)]
+            # g(omega): odd features, g(-omega) = -g(omega), size r/2
+            # h(omega): even features, h(-omega) = h(ω), size r/2
+
+            # Network for odd features g(omega)
+            self.odd_net = self._build_mlp(input_dim, int(rank/2), hidden_dims, activation)
+
+            # Network for even features h(omega)
+            self.even_net = self._build_mlp(input_dim, int(rank/2), hidden_dims, activation)
+
+            self.feature_net = None  # Not used in even-odd mode
+        else:
+            # Standard approach: single network
+            # f(omega) in R^r
+            self.feature_net = self._build_mlp(input_dim, rank, hidden_dims, activation)
+            self.odd_net = None
+            self.even_net = None
+
+        # Initialize with Xavier (better than std=0.01)
+        self._init_weights()
+
+    def _build_mlp(
+        self,
+        input_dim: int,
+        output_dim: int,
+        hidden_dims: List[int],
+        activation: str
+    ) -> nn.Sequential:
+        """Build an MLP network."""
         layers = []
         prev_dim = input_dim
 
@@ -87,17 +125,14 @@ class FactorizedSpectralDensityNetwork(nn.Module):
             layers.append(self._get_activation(activation))
             prev_dim = hidden_dim
 
-        # Output: r-dimensional feature vector
-        layers.append(nn.Linear(prev_dim, rank))
+        # Output layer
+        layers.append(nn.Linear(prev_dim, output_dim))
 
         # Add final activation to bound features and prevent explosion
         # Tanh bounds to [-1, 1], helping with stable training
         layers.append(nn.Tanh())
 
-        self.feature_net = nn.Sequential(*layers)
-
-        # Initialize with Xavier (better than std=0.01)
-        self._init_weights()
+        return nn.Sequential(*layers)
 
     def _init_weights(self):
         """Initialize with Xavier uniform for stable training."""
@@ -174,8 +209,12 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         r"""
         Compute feature vector f(\omega).
 
-        If enforce_symmetry=True, enforces f(\omega) = f(-\omega) to ensure:
-        s(-\omega, -\omega') = s(\omega, \omega')
+        If use_even_odd_features=True:
+            f(omega) = [g(omega), h(omega)]
+            where g(-omega) = -g(omega) (odd) and h(-omega) = h(omega) (even)
+
+        If enforce_symmetry=True (default):
+            Enforces f(omega) = f(-omega)
 
         Parameters
         ----------
@@ -185,18 +224,29 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         Returns
         -------
         features : torch.Tensor, shape (n, r)
-            Feature vectors (symmetrized if enforce_symmetry=True)
+            Feature vectors
         """
         if omega.dim() == 1:
             omega = omega.unsqueeze(0)
 
-        if self.enforce_symmetry:
-            # Symmetrize: f(\omega) = [\tilde{f}(\omega) + \tilde{f}(-\omega)] / 2
+        if self.use_even_odd_features:
+            # Even-Odd Decomposition
+            # Odd features: g(-omega) = -g(omega)
+            g = (self.odd_net(omega) - self.odd_net(-omega)) / 2.0
+
+            h = (self.even_net(omega) + self.even_net(-omega)) / 2.0
+
+            # Concatenate: f(omega) = [g(omega), h(omega)]
+            # TODO: Verify devision by two because of tanh MLP constraint?
+            f = torch.cat([g/2.0, h/2.0], dim=-1)
+
+        elif self.enforce_symmetry:
+            # Symmetrize: f(omega) = [tilde{f}(omega) + tilde{f}(-omega)] / 2
             f = (self.feature_net(omega) + self.feature_net(-omega)) / 2.0
         else:
             # Use features directly (for debugging or experimenting with weaker constraints)
             f = self.feature_net(omega)
-            
+
         if torch.isnan(f).any():
              print("compute_features produced NaNs!")
              print(f"omega stats: {omega.min()}/{omega.max()}")
