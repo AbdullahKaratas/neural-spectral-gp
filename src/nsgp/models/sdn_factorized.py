@@ -7,8 +7,18 @@ This version guarantees positive semi-definiteness by using a low-rank factoriza
 where fᵢ are learned feature functions. This ensures s is positive semi-definite
 by construction, enabling reliable sampling.
 
+Symmetrized Spectral Density (use_symmetrized_density=True):
+    s(omega, omega') = [f(omega)^T f(omega') + f(-omega)^T f(-omega')] / 2
+
+    This satisfies:
+    - Hermitian: s(omega, omega') = s(omega', omega)
+    - Reality: s(omega, omega') = s(-omega, -omega')
+    - PSD: S = (F F^T + F_neg F_neg^T) / 2 (sum of Gram matrices)
+
 Authors: Abdullah Karatas, Arsalan Jawaid
 """
+
+import math
 
 import torch
 import torch.nn as nn
@@ -44,6 +54,11 @@ class FactorizedSpectralDensityNetwork(nn.Module):
     enforce_symmetry : bool
         If True, enforce f(omega) = f(-omega) to guarantee s(-omega,-omega') = s(omega,omega').
         If False, use f(omega) directly (useful for debugging). Default: True.
+    use_symmetrized_density : bool
+        If True, use symmetrized spectral density:
+            s(omega, omega') = [f(omega)^T f(omega') + f(-omega)^T f(-omega')] / 2
+        This removes the unwanted constraint s(omega, omega') = s(omega, -omega')
+        while maintaining Hermitian, Reality, and PSD properties. Default: False.
     """
 
     def __init__(
@@ -57,7 +72,8 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         enforce_symmetry: bool = True,
         omega_grid: Optional[torch.Tensor] = None,
         complex_measure: bool = False,
-        use_even_odd_features: bool = False
+        use_even_odd_features: bool = False,
+        use_symmetrized_density: bool = False
     ):
         super().__init__()
         self.input_dim = input_dim
@@ -67,6 +83,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         self.omega_max = omega_max
         self.enforce_symmetry = enforce_symmetry
         self.use_even_odd_features = use_even_odd_features
+        self.use_symmetrized_density = use_symmetrized_density
 
         # Enforce constraint: even-odd features require complex measures
         if use_even_odd_features and not complex_measure:
@@ -249,7 +266,33 @@ class FactorizedSpectralDensityNetwork(nn.Module):
 
         if torch.isnan(f).any():
              print("compute_features produced NaNs!")
-             print(f"omega stats: {omega.min()}/{omega.max()}")
+
+        return f
+
+    def compute_raw_features(self, omega: torch.Tensor) -> torch.Tensor:
+        """
+        Compute raw feature vector f(omega) without any symmetry constraints.
+
+        Used by symmetrized_density mode where symmetry is enforced at the
+        spectral density level rather than the feature level.
+
+        Parameters
+        ----------
+        omega : torch.Tensor, shape (n, d)
+            Frequency vectors
+
+        Returns
+        -------
+        features : torch.Tensor, shape (n, r)
+            Raw feature vectors
+        """
+        if omega.dim() == 1:
+            omega = omega.unsqueeze(0)
+
+        f = self.feature_net(omega)
+
+        if torch.isnan(f).any():
+            print("compute_raw_features produced NaNs!")
 
         return f
 
@@ -260,20 +303,33 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         Uses factorized representation: s(omega, omega') = f(omega)^T f(omega')
         This guarantees S is positive semi-definite.
 
+        If use_symmetrized_density=True:
+            S = (F F^T + F_neg F_neg^T) / 2
+        where F_neg[m,:] = f(-omega_m)
+
         Returns
         -------
         S : torch.Tensor, shape (M, M)
             Spectral density matrix
         """
-        f = self.compute_features(self.omega_grid)  # (M, r)
-        S = f @ f.T  # (M, M)
+        if self.use_symmetrized_density:
+            F_pos = self.compute_raw_features(self.omega_grid)   # (M, r)
+            F_neg = self.compute_raw_features(-self.omega_grid)  # (M, r)
+            S = (F_pos @ F_pos.T + F_neg @ F_neg.T) / 2  # (M, M)
+        else:
+            f = self.compute_features(self.omega_grid)  # (M, r)
+            S = f @ f.T  # (M, M)
         return S
 
     def forward(self, omega1: torch.Tensor, omega2: torch.Tensor) -> torch.Tensor:
         """
-        Compute s(ω₁, ω₂) = f(ω₁)ᵀ f(ω₂).
+        Compute s(omega1, omega2).
 
-        This is GUARANTEED to be positive semi-definite!
+        If use_symmetrized_density=True:
+            s(omega1, omega2) = [f(omega1)^T f(omega2) + f(-omega1)^T f(-omega2)] / 2
+
+        Otherwise:
+            s(omega1, omega2) = f(omega1)^T f(omega2)
 
         Parameters
         ----------
@@ -285,13 +341,18 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         s : torch.Tensor
             Spectral density values
         """
-        # Compute features
-        f1 = self.compute_features(omega1)  # (n, r)
-        f2 = self.compute_features(omega2)  # (m, r)
-
-        # s(ω₁, ω₂) = f(ω₁)ᵀ f(ω₂)
-        # This is already ≥ 0 by construction, no need to add constant!
-        s = torch.sum(f1 * f2, dim=-1)  # (n,) or (n, m) if broadcasting
+        if self.use_symmetrized_density:
+            f1_pos = self.compute_raw_features(omega1)   # (n, r)
+            f2_pos = self.compute_raw_features(omega2)   # (m, r)
+            f1_neg = self.compute_raw_features(-omega1)  # (n, r)
+            f2_neg = self.compute_raw_features(-omega2)  # (m, r)
+            s = (torch.sum(f1_pos * f2_pos, dim=-1) + torch.sum(f1_neg * f2_neg, dim=-1)) / 2
+        else:
+            # Compute features
+            f1 = self.compute_features(omega1)  # (n, r)
+            f2 = self.compute_features(omega2)  # (m, r)
+            # s(omega1, omega2) = f(omega1)^T f(omega2)
+            s = torch.sum(f1 * f2, dim=-1)  # (n,) or (n, m) if broadcasting
 
         return s
 
@@ -329,7 +390,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
 
         Returns
         -------
-        L : torch.Tensor, shape (n, num_freqs)
+        L : torch.Tensor, shape (n, r) or (n, 2r) if use_symmetrized_density=True
             Low-rank feature matrix where K = LL^T
         """
         # Input validation
@@ -372,7 +433,12 @@ class FactorizedSpectralDensityNetwork(nn.Module):
             )
 
         # Compute low rank features * spacing
-        F_low = self.compute_features(self.omega_grid) * spacing
+        if self.use_symmetrized_density:
+            F_pos = self.compute_raw_features(self.omega_grid)   # (num_freqs, r)
+            F_neg = self.compute_raw_features(-self.omega_grid)  # (num_freqs, r)
+            F_low = torch.cat([F_pos / math.sqrt(2), F_neg / math.sqrt(2)], dim=-1) * spacing  # (num_freqs, 2r)
+        else:
+            F_low = self.compute_features(self.omega_grid) * spacing  # (num_freqs, r)
 
         # Compute cosine basis
         # X: (n, d), self.omega_grid: (num_freqs, d) -> phases: (n, num_freqs)
@@ -411,7 +477,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         else:
             # Compute low-rank features
             # S already includes (Δω)² scaling
-            L = B_cos @ F_low  # (n, num_freqs)
+            L = B_cos @ F_low  # (n, r) or (n, 2r)
 
         # Apply learnable scale: L_scaled = sqrt(theta) * L
         L *= torch.exp(0.5 * self.log_scale)  # Inplace operation
