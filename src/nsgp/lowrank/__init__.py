@@ -1,3 +1,3 @@
-from .nonstationary_features import NonstationaryFeatures
+from .nff import NonstationaryFeatures
 
 __all__ = ["NonstationaryFeatures"]

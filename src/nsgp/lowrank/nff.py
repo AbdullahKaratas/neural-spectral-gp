@@ -77,11 +77,13 @@ class NonstationaryFeatures:
             return kernel_root
 
     def simulation(
-        self, x1: Union[torch.Tensor], spacing: Union[float] = 1.0, **kwargs
+        self, x1: Union[torch.Tensor], spacing: Union[float] = 1.0, n_samples: int = 1, seed=None, **kwargs
     ):
+        if seed is not None:
+            torch.manual_seed(seed)
         kernel_root = self.lowrank(x1=x1, spacing=spacing, **kwargs)
-        rvs = torch.randn(self.num_feat, dtype=kernel_root.dtype)
-        return kernel_root.matmul(rvs)
+        rvs = torch.randn(kernel_root.shape[1], n_samples, dtype=kernel_root.dtype)
+        return kernel_root.matmul(rvs).T
 
     def kernel_estimate(
         self,
