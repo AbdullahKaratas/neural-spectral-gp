@@ -68,11 +68,18 @@ class FactorizedSpectralDensityNetwork(nn.Module):
 
         # Frequency grid for low-rank NFF (optional, created if None)
         spacing = omega_max / self.n_features
-        self.register_buffer(
-            "omega_grid",
-            torch.arange(-self.n_features + 1, self.n_features).reshape(-1, 1).float()
-            * spacing,
-        )
+        if enforce_symmetry:
+            self.register_buffer(
+                "omega_grid",
+                torch.arange(0, self.n_features).reshape(-1, 1).float()
+                * spacing,
+            )
+        else:
+            self.register_buffer(
+                "omega_grid",
+                torch.arange(-self.n_features + 1, self.n_features).reshape(-1, 1).float()
+                * spacing,
+            )
 
         # Learnable global scale (log variance)
         # Initialize to -2.0 for moderate initial scale (exp(-2) ≈ 0.135)
@@ -225,10 +232,14 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         S : torch.Tensor, shape (M, M)
             Spectral density matrix
         """
-        F_pos = self.compute_raw_features(self.omega_grid)   # (M, r)
-        F_neg = self.compute_raw_features(-self.omega_grid)  # (M, r)
-        S = (F_pos @ F_pos.T + F_neg @ F_neg.T)
-        return S
+        if self.enforce_symmetry:
+            f = self.compute_features(self.omega_grid)
+            S = f @ f.T
+        else:
+            F_pos = self.compute_features(self.omega_grid)
+            F_neg = self.compute_features(-self.omega_grid)
+            S = F_pos @ F_pos.T + F_neg @ F_neg.T
+        return S * torch.exp(self.log_scale)
 
     def forward(self, omega1: torch.Tensor, omega2: torch.Tensor) -> torch.Tensor:
         """
@@ -246,12 +257,19 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         s : torch.Tensor
             Spectral density values
         """
-        f1_pos = self.compute_raw_features(omega1)   # (n, r)
-        f2_pos = self.compute_raw_features(omega2)   # (m, r)
-        f1_neg = self.compute_raw_features(-omega1)  # (n, r)
-        f2_neg = self.compute_raw_features(-omega2)  # (m, r)
-        s = (torch.sum(f1_pos * f2_pos, dim=-1) + torch.sum(f1_neg * f2_neg, dim=-1))
-        return s ## TODO: Brauche ich das?
+        if self.enforce_symmetry:
+            # Compute features
+            f1 = self.compute_features(omega1)  # (n, r)
+            f2 = self.compute_features(omega2)  # (m, r)
+            # s(omega1, omega2) = f(omega1)^T f(omega2)
+            s = torch.sum(f1 * f2, dim=-1)  # (n,) or (n, m) if broadcasting
+        else:
+            f1_pos = self.compute_features(omega1)
+            f2_pos = self.compute_features(omega2)
+            f1_neg = self.compute_features(-omega1)
+            f2_neg = self.compute_features(-omega2)
+            s = (torch.sum(f1_pos * f2_pos, dim=-1) + torch.sum(f1_neg * f2_neg, dim=-1))
+        return s * torch.exp(self.log_scale)
 
     def compute_lowrank_features(
         self,
@@ -313,15 +331,17 @@ class FactorizedSpectralDensityNetwork(nn.Module):
                 f"Consider using at least {int(np.ceil(self.omega_grid.max().item() / (np.pi / constraint_rhs)))+1} frequency points."
             )
 
-        # Compute low rank features * spacing
+        # Compute low rank features
         F_pos = self.compute_features(self.omega_grid)   # (num_freqs, r)
-        F_neg = self.compute_features(-self.omega_grid)  # (num_freqs, r)
+        if not self.enforce_symmetry:
+            F_neg = self.compute_features(-self.omega_grid)  # (num_freqs, r)
 
         # Compute cosine basis
         # X: (n, d), self.omega_grid: (num_freqs, d) -> phases: (n, num_freqs)
         phases = X @ self.omega_grid.T  # (n, num_freqs)
         B_cos = torch.cos(phases)  # (n, num_freqs)
-        B_sin = torch.sin(phases)  # (n, num_freqs)
+        if not self.enforce_symmetry:
+            B_sin = torch.sin(phases)  # (n, num_freqs)
 
         # Correction for zero frequency (Trapezoidal rule boundary)
         # At ω=0, the weight should be 0.5 * dω (trapezoidal rule for boundary points).
@@ -332,18 +352,22 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         is_zero = omega_norms < 1e-10
         if torch.any(is_zero):
             B_cos[:, is_zero] = 0.5
-            B_sin[:, is_zero] = 0.0
+            if not self.enforce_symmetry:
+                B_sin[:, is_zero] = 0.0
 
         psi_real = B_cos @ F_pos * spacing
-        psi_imag = B_sin @ F_pos * spacing
-        psi_neg_real = B_cos @ F_neg * spacing
-        psi_neg_imag = B_sin @ F_neg * spacing
-        L = torch.cat(
-            [psi_real, psi_imag, psi_neg_real, psi_neg_imag], dim=1
-        )
+        if self.enforce_symmetry:
+            L = psi_real
+        else:
+            psi_imag = B_sin @ F_pos * spacing
+            psi_neg_real = B_cos @ F_neg * spacing
+            psi_neg_imag = B_sin @ F_neg * spacing
+            L = torch.cat(
+                [psi_real, psi_imag, psi_neg_real, psi_neg_imag], dim=1
+            )
 
         # Apply learnable scale: L_scaled = sqrt(theta) * L
-        L *= torch.exp(0.5 * self.log_scale)  # Inplace operation
+        L *= torch.exp(0.5 * self.log_scale)
 
         return L
 
