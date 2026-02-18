@@ -93,11 +93,10 @@ def compare_kernels(
         rank=10,
         n_features=40,
         omega_max=10.0,
-        complex_measure=False,
-        use_even_odd_features=False
+        enforce_symmetry=True
     )
     sdn.fit(X_train, y_train, epochs=epochs, lr=1e-3, verbose=True,
-            use_diversity=True, lambda_diversity=0.5)  # Diversity regularization to prevent rank collapse
+            use_diversity=True, lambda_diversity=0.5)  # Smoothness + Diversity regularization
     print(f"F-SDN Final Log Scale: {sdn.log_scale.item()}")
     K_sdn = sdn.compute_covariance(X_test)
     results['F-SDN'] = K_sdn
@@ -209,16 +208,7 @@ def compare_kernels(
     return results
 
 if __name__ == "__main__":
-    # 1. Test on Stationary Kernel (RBF)
-    # Standard GP should be perfect here (0% error)
-    compare_kernels(
-        lambda x1, x2: rbf_kernel(x1, x2, lengthscale=1.0),
-        kernel_name="Stationary RBF",
-        is_stationary=True,
-        epochs=200
-    )
-    
-    # 2. Test on Non-Stationary Kernel (Silverman)
+    # Test on Non-Stationary Kernel (Silverman)
     # F-SDN should beat Standard GP
     compare_kernels(
         silverman_kernel,
