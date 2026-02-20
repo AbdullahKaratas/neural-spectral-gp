@@ -547,3 +547,38 @@ class FactorizedSpectralDensityNetwork(nn.Module):
                 print(f"\n✓ Restored best model (loss: {best_loss:.4f})")
 
         return losses
+
+    def predict(self, X_test, X_train, y_train, predictive_dist=True):
+        """
+        Posterior prediction using Low-rank approximation.
+        """
+        noise_var = torch.exp(self.log_noise_var).item()
+
+        L = self.compute_lowrank_features(X_train)
+        _, rank4r = L.shape
+
+        G = L.T @ L
+        M = noise_var * torch.eye(rank4r, device=L.device) + G
+        M_chol = torch.linalg.cholesky(M)
+
+        Lty = L.T @ y_train
+        M_inv_Lty = torch.cholesky_solve(Lty.unsqueeze(-1), M_chol).squeeze(-1)
+        beta = (Lty - G @ M_inv_Lty) / noise_var
+
+        M_inv_G = torch.cholesky_solve(G, M_chol)
+        LtSigmaInvL = (G - G @ M_inv_G) / noise_var
+        Q = torch.eye(rank4r, device=L.device) - LtSigmaInvL
+
+        L_star = self.compute_lowrank_features(X_test)
+
+        # Posterior mean and variance
+        mean = L_star @ beta
+
+        L_star_Q = L_star @ Q
+        var = torch.sum(L_star_Q * L_star, dim=1)
+        if predictive_dist:
+            var += noise_var
+        var = torch.clamp(var, min=1e-6)
+        std = torch.sqrt(var)
+
+        return mean, std
