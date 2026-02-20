@@ -320,7 +320,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
             psi_imag = B_sin @ F_pos * spacing
             psi_neg_real = B_cos @ F_neg * spacing
             psi_neg_imag = B_sin @ F_neg * spacing
-            L = torch.cat(
+            L = math.sqrt(2.0) * torch.cat(
                 [psi_real, psi_imag, psi_neg_real, psi_neg_imag], dim=1
             )
 
