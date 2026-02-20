@@ -114,10 +114,6 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         # Output layer
         layers.append(nn.Linear(prev_dim, output_dim))
 
-        # Add final activation to bound features and prevent explosion
-        # Tanh bounds to [-1, 1], helping with stable training
-        layers.append(nn.Tanh())
-
         return nn.Sequential(*layers)
 
     def _init_weights(self):
@@ -530,7 +526,6 @@ class FactorizedSpectralDensityNetwork(nn.Module):
             # Print progress
             if verbose and (epoch % 100 == 0 or epoch == epochs - 1):
                 print(f"Epoch {epoch:4d}/{epochs} | Loss: {loss.item():.4f} | "
-                      f"Data: {data_loss.item():.4f} | LR: {current_lr:.6f} | "
                       f"Best: {best_loss:.4f}")
 
             # Early stopping
