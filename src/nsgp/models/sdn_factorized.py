@@ -15,8 +15,7 @@ import math
 import torch
 import torch.nn as nn
 import numpy as np
-from typing import Optional, List, Tuple
-from ..lowrank import NonstationaryFeatures
+from typing import Optional, List
 
 
 class FactorizedSpectralDensityNetwork(nn.Module):
@@ -57,6 +56,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         omega_max: float = 8.0,
         activation: str = 'elu',
         enforce_symmetry: bool = True,
+        learn_log_scale: bool = False,
     ):
         super().__init__()
         self.input_dim = input_dim
@@ -65,6 +65,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         self.n_features = n_features
         self.omega_max = omega_max
         self.enforce_symmetry = enforce_symmetry
+        self.learn_log_scale = learn_log_scale
 
         # Frequency grid for low-rank NFF (optional, created if None)
         spacing = omega_max / self.n_features
@@ -84,7 +85,13 @@ class FactorizedSpectralDensityNetwork(nn.Module):
 
         # Learnable global scale (log variance)
         # Initialize to 0.0 for unit signal variance (exp(0) = 1.0) when targets are standardized
-        self.log_scale = nn.Parameter(torch.tensor(0.0))
+        if learn_log_scale:
+            self.log_scale = nn.Parameter(torch.tensor(0.0))
+        else:
+            self.register_buffer(
+                "log_scale",
+                torch.tensor(0.0)
+            )
 
         # Learnable noise variance (log scale for numerical stability)
         # Initialize to log(0.5^2) for noise_std = 0.5
@@ -113,6 +120,10 @@ class FactorizedSpectralDensityNetwork(nn.Module):
 
         # Output layer
         layers.append(nn.Linear(prev_dim, output_dim))
+
+        # Tanh bounds to [-1, 1], helping with stable training
+        if self.learn_log_scale:
+            layers.append(nn.Tanh())
 
         return nn.Sequential(*layers)
 
