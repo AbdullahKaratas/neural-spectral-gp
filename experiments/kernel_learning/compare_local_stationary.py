@@ -27,10 +27,10 @@ from nsgp.kernel import LocalStationaryKernel
 def compare_kernels(
     kernel_fn,
     kernel_name: str,
-    is_stationary: bool = False,
     n_train: int = 100,
     n_test: int = 50,
     epochs: int = 500,
+    noise_var: float = 0.1,
     seed: int = 42
 ):
     print(f"\n{'='*80}")
@@ -48,8 +48,8 @@ def compare_kernels(
     K_true_train = kernel_fn(X_train, X_train)
     K_true_test = kernel_fn(X_test, X_test)
     
-    # Generate y
-    L = torch.linalg.cholesky(K_true_train + 1e-4 * torch.eye(n_train))
+    # Generate noisy y
+    L = torch.linalg.cholesky(K_true_train + noise_var * torch.eye(n_train))
     y_train = (L @ torch.randn(n_train)).squeeze()
 
     # Normalize inputs
@@ -66,9 +66,9 @@ def compare_kernels(
 
     # 1. Standard GP Baseline
     print("\n[Standard GP] Training...")
-    gp = StandardGP(kernel_type='rbf' if is_stationary else 'rbf') # Use RBF as baseline for everything
+    gp = StandardGP()
     gp.fit(X_train, y_train, epochs=epochs, lr=0.01, verbose=True)
-    K_gp = gp.forward(X_test, X_test)
+    K_gp = gp.compute_covariance(X_test, X_test)
     results['Standard GP'] = K_gp
     
     # 2. F-SDN (Ours)
@@ -77,11 +77,12 @@ def compare_kernels(
         input_dim=1,
         hidden_dims=[64, 64],
         rank=10,
-        n_features=40,
+        n_features=80,
         omega_max=10.0,
-        enforce_symmetry=True
+        enforce_symmetry=False,
+        activation="tanh"
     )
-    sdn.fit(X_train_normalized, y_train_std, epochs=epochs, lr=0.01, verbose=True)
+    sdn.fit(X_train_normalized, y_train_std, epochs=epochs, lr=0.01, verbose=True, patience=2000)
     print(f"F-SDN Final Log Scale: {sdn.log_scale.item()}")
     # Compute covariance in standardized space and un-standardize
     K_sdn_std = sdn.compute_covariance(X_test_normalized)
@@ -141,6 +142,4 @@ if __name__ == "__main__":
     compare_kernels(
         lsk.kernel,
         kernel_name="Silverman Non-Stationary",
-        is_stationary=False,
-        epochs=500
     )
