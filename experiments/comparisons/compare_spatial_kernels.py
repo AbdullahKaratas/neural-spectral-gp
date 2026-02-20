@@ -11,38 +11,14 @@ Metrics:
 Authors: Abdullah Karatas, Arsalan Jawaid
 """
 
-import sys
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
-from pathlib import Path
-import time
-
-# Add src to path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 from nsgp.models.sdn_factorized import FactorizedSpectralDensityNetwork
-from nsgp.models.remes_baseline import RemesNeuralSpectralKernel
 from nsgp.models.standard_gp import StandardGP
 
-# ============================================================================
-# KERNEL DEFINITIONS (Ground Truth)
-# ============================================================================
-
-def silverman_kernel(X1, X2, a=0.5):
-    """Silverman locally stationary kernel."""
-    if X1.dim() == 2: X1 = X1.squeeze(-1)
-    if X2.dim() == 2: X2 = X2.squeeze(-1)
-    x_mean = (X1.unsqueeze(1) + X2.unsqueeze(0)) / 2.0
-    x_diff = X1.unsqueeze(1) - X2.unsqueeze(0)
-    return torch.exp(-2.0 * a * x_mean**2) * torch.exp(-a / 2.0 * x_diff**2)
-
-def rbf_kernel(X1, X2, lengthscale=1.0, variance=1.0):
-    """Standard RBF Kernel."""
-    if X1.dim() == 2: X1 = X1.squeeze(-1)
-    if X2.dim() == 2: X2 = X2.squeeze(-1)
-    dist_sq = (X1.unsqueeze(1) - X2.unsqueeze(0))**2
-    return variance * torch.exp(-dist_sq / (2 * lengthscale**2))
+from nsgp.kernel import LocalStationaryKernel
 
 # ============================================================================
 # COMPARISON LOGIC
@@ -75,9 +51,19 @@ def compare_kernels(
     # Generate y
     L = torch.linalg.cholesky(K_true_train + 1e-4 * torch.eye(n_train))
     y_train = (L @ torch.randn(n_train)).squeeze()
-    
+
+    # Normalize inputs
+    x_scale = torch.abs(X_train).max()
+    X_train_normalized = X_train / x_scale
+    X_test_normalized = X_test / x_scale
+
+    # Standardize outputs
+    y_mean = y_train.mean()
+    y_std = y_train.std()
+    y_train_std = (y_train - y_mean) / y_std
+
     results = {}
-    
+
     # 1. Standard GP Baseline
     print("\n[Standard GP] Training...")
     gp = StandardGP(kernel_type='rbf' if is_stationary else 'rbf') # Use RBF as baseline for everything
@@ -95,84 +81,27 @@ def compare_kernels(
         omega_max=10.0,
         enforce_symmetry=True
     )
-    sdn.fit(X_train, y_train, epochs=epochs, lr=1e-3, verbose=True,
-            use_diversity=True, lambda_diversity=0.5)  # Smoothness + Diversity regularization
+    sdn.fit(X_train_normalized, y_train_std, epochs=epochs, lr=0.01, verbose=True)
     print(f"F-SDN Final Log Scale: {sdn.log_scale.item()}")
-    K_sdn = sdn.compute_covariance(X_test)
+    # Compute covariance in standardized space and un-standardize
+    K_sdn_std = sdn.compute_covariance(X_test_normalized)
+    K_sdn = K_sdn_std * y_std**2
     results['F-SDN'] = K_sdn
-    
-    # 3. Remes (Baseline) - Official Code
-    print("[Remes] Training (Official Code)...")
-    try:
-        import subprocess
-        import tempfile
-        
-        with tempfile.TemporaryDirectory() as tmpdir:
-            train_x_path = Path(tmpdir) / "train_x.npy"
-            train_y_path = Path(tmpdir) / "train_y.npy"
-            test_x_path = Path(tmpdir) / "test_x.npy"
-            output_path = Path(tmpdir) / "output.npy"
-            
-            np.save(train_x_path, X_train.numpy())
-            np.save(train_y_path, y_train.numpy())
-            np.save(test_x_path, X_test.numpy())
-            
-            wrapper_path = Path(__file__).parent.parent / "baselines" / "run_remes.py"
-            
-            cmd = [
-                sys.executable, str(wrapper_path),
-                "--train_x", str(train_x_path),
-                "--train_y", str(train_y_path),
-                "--test_x", str(test_x_path),
-                "--output", str(output_path),
-                "--epochs", str(epochs)
-            ]
-            
-            result = subprocess.run(cmd, check=True, capture_output=True, text=True)
 
-            # Verify output file was created
-            if not output_path.exists():
-                raise FileNotFoundError(f"Remes baseline did not create output file: {output_path}")
-
-            K_remes = torch.tensor(np.load(output_path))
-            results['Remes'] = K_remes
-
-    except subprocess.CalledProcessError as e:
-        print(f"❌ Failed to run Remes baseline (exit code {e.returncode}): {e}")
-        print(f"Command: {' '.join(cmd)}")
-        if e.stdout:
-            print(f"Stdout: {e.stdout}")
-        if e.stderr:
-            print(f"Stderr: {e.stderr}")
-        # Fallback to internal implementation
-        print("Falling back to internal implementation...")
-        remes = RemesNeuralSpectralKernel(input_dim=1, hidden_dims=[32, 32])
-        remes.fit(X_train, y_train, epochs=epochs, verbose=False)
-        K_remes, _ = remes.compute_covariance(X_test, noise_var=0.0)
-        results['Remes'] = K_remes
-    except FileNotFoundError as e:
-        print(f"❌ Remes baseline file not found: {e}")
-        # Fallback to internal implementation or zeros
-        print("Falling back to internal implementation...")
-        remes = RemesNeuralSpectralKernel(input_dim=1, hidden_dims=[32, 32])
-        remes.fit(X_train, y_train, epochs=epochs, verbose=False)
-        K_remes, _ = remes.compute_covariance(X_test, noise_var=0.0)
-        results['Remes'] = K_remes
-    
     # ============================================================================
     # VISUALIZATION & METRICS
     # ============================================================================
-    
-    fig, axes = plt.subplots(2, 4, figsize=(20, 10))
+
+    fig, axes = plt.subplots(2, 3, figsize=(15, 10))
     
     # Plot Ground Truth
     im0 = axes[0, 0].imshow(K_true_test.numpy(), cmap='viridis')
     axes[0, 0].set_title(f"True Kernel\n{kernel_name}")
     plt.colorbar(im0, ax=axes[0, 0])
     axes[1, 0].axis('off') # No error plot for ground truth
-    
-    methods = ['Standard GP', 'F-SDN', 'Remes']
-    
+
+    methods = ['Standard GP', 'F-SDN']
+
     print("\nResults (Relative Frobenius Error):")
     
     for i, method in enumerate(methods):
@@ -201,17 +130,16 @@ def compare_kernels(
         plt.colorbar(im_diff, ax=axes[1, i+1])
         
     plt.tight_layout()
-    output_path = Path(__file__).parent / f"comparison_{kernel_name.replace(' ', '_').lower()}.png"
-    plt.savefig(output_path)
-    print(f"\nSaved plot to {output_path}")
+    plt.show()
     
     return results
 
 if __name__ == "__main__":
     # Test on Non-Stationary Kernel (Silverman)
     # F-SDN should beat Standard GP
+    lsk = LocalStationaryKernel(a=0.5)
     compare_kernels(
-        silverman_kernel,
+        lsk.kernel,
         kernel_name="Silverman Non-Stationary",
         is_stationary=False,
         epochs=500
