@@ -495,8 +495,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
             print(f"  Rank: {self.rank}")
             print(f"  Epochs: {epochs}")
             print(f"  Initial LR: {lr}")
-            print(f"  Method: Low-rank NFF")
-            print(f"  Omega grid: {self.omega_grid.shape[0]} points from 0 to {self.omega_max}")
+            print(f"  Features: {self.omega_grid.shape[0]}")
             print()
 
         for epoch in range(epochs):
