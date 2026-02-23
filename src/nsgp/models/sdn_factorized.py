@@ -56,7 +56,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         omega_max: float = 8.0,
         activation: str = 'elu',
         enforce_symmetry: bool = True,
-        learn_log_scale: bool = False,
+        learn_log_scale: bool = True,
     ):
         super().__init__()
         self.input_dim = input_dim
@@ -66,6 +66,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         self.omega_max = omega_max
         self.enforce_symmetry = enforce_symmetry
         self.learn_log_scale = learn_log_scale
+        self.activation = activation
 
         # Frequency grid for low-rank NFF (optional, created if None)
         spacing = omega_max / self.n_features
@@ -121,21 +122,28 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         # Output layer
         layers.append(nn.Linear(prev_dim, output_dim))
 
-        # Tanh bounds to [-1, 1], helping with stable training
-        if self.learn_log_scale:
-            layers.append(nn.Tanh())
-
         return nn.Sequential(*layers)
 
     def _init_weights(self):
-        """Initialize with Xavier uniform for stable training."""
+        act = self._get_activation_name()
+
         for m in self.modules():
             if isinstance(m, nn.Linear):
-                # Xavier initialization - good default for tanh/sigmoid activations
-                # gain=1.0 for tanh (default)
-                nn.init.xavier_uniform_(m.weight, gain=1.0)
+                if act in ("relu", "elu"):
+                    nn.init.kaiming_normal_(m.weight, mode="fan_in", nonlinearity="relu")
+                elif act == "tanh":
+                    nn.init.xavier_uniform_(m.weight, gain=nn.init.calculate_gain("tanh"))
+                else:
+                    nn.init.xavier_uniform_(m.weight, gain=1.0)
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
+
+        last = [m for m in self.feature_net.modules() if isinstance(m, nn.Linear)][-1]
+        with torch.no_grad():
+            last.weight.mul_(0.05)
+
+    def _get_activation_name(self):
+        return self.activation
 
     def _get_activation(self, activation: str) -> nn.Module:
         """Get activation function."""
@@ -315,7 +323,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
 
         psi_real = B_cos @ F_pos * spacing
         if self.enforce_symmetry:
-            L = psi_real
+            L = math.sqrt(2.0) * psi_real
         else:
             psi_imag = B_sin @ F_pos * spacing
             psi_neg_real = B_cos @ F_neg * spacing
@@ -411,12 +419,8 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         log_det_W = 2 * torch.sum(torch.log(torch.diag(Lw)))  # log|W| = 2·sum(log(diag(Lw)))
         log_det = log_det_sigma + log_det_W
 
-        # Negative log marginal likelihood (up to constant and scaling)
-        # NOTE: This is proportional to the true NLL. We omit:
-        #   - 0.5 factor (doesn't affect optimization)
-        #   - n log(2 pi) constant term (doesn't affect optimization)
-        # Full NLL = 0.5 * (data_fit + log_det) + 0.5*n*log(2 pi)
-        nll = data_fit + log_det
+        # Negative log marginal likelihood
+        nll = 0.5 * (data_fit + log_det + n * math.log(2.0 * math.pi))
 
         return nll
 
@@ -474,13 +478,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
             Training loss history
         """
         # Optimizer
-        optimizer = torch.optim.Adam(self.parameters(), lr=lr)
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
-            optimizer,
-            T_0=100,
-            T_mult=2,
-            eta_min=lr / 100
-        )
+        optimizer = torch.optim.Adam(self.parameters(), lr=lr, amsgrad=True)
 
         # Early stopping
         best_loss = float('inf')
@@ -520,7 +518,6 @@ class FactorizedSpectralDensityNetwork(nn.Module):
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.parameters(), max_norm=1.0)
             optimizer.step()
-            scheduler.step()
 
             # Track
             losses.append(loss.item())
@@ -546,11 +543,14 @@ class FactorizedSpectralDensityNetwork(nn.Module):
                           f"(no improvement for {patience} epochs)")
                 break
 
-        # Restore best model
+        # Restore best model and store best loss
         if best_state is not None:
             self.load_state_dict(best_state)
+            self.best_loss = best_loss
             if verbose:
                 print(f"\n✓ Restored best model (loss: {best_loss:.4f})")
+        else:
+            self.best_loss = loss.item()
 
         return losses
 
