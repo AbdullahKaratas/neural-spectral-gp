@@ -14,6 +14,7 @@ Authors: Abdullah Karatas, Arsalan Jawaid
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
+import pandas as pd
 
 from nsgp.models.sdn_factorized import FactorizedSpectralDensityNetwork
 from nsgp.models.standard_gp import StandardGP
@@ -91,6 +92,31 @@ def compare_kernels(
     v_true = torch.cholesky_solve(K_true_test_train.T, L_true)
     var_true = torch.diag(K_true_test - K_true_test_train @ v_true) + noise_var
     std_true = torch.sqrt(torch.clamp(var_true, min=1e-6))
+
+    # Save posterior prediction data to CSV
+    X_plot = X_test.squeeze().detach().numpy()
+    posterior_data = pd.DataFrame({
+        'x': X_plot,
+        'true_mean': mean_true.detach().numpy(),
+        'true_lower': (mean_true - 2 * std_true).detach().numpy(),
+        'true_upper': (mean_true + 2 * std_true).detach().numpy(),
+        'fsdn_mean': mean_sdn.detach().numpy(),
+        'fsdn_lower': (mean_sdn - 2 * std_sdn).detach().numpy(),
+        'fsdn_upper': (mean_sdn + 2 * std_sdn).detach().numpy(),
+        'rbf_mean': mean_gp.detach().numpy(),
+        'rbf_lower': (mean_gp - 2 * std_gp).detach().numpy(),
+        'rbf_upper': (mean_gp + 2 * std_gp).detach().numpy(),
+    })
+    posterior_data.to_csv('paper/kernel_learning_posterior.csv', index=False)
+
+    # Save training data
+    X_train_plot = X_train.squeeze().detach().numpy()
+    y_train_plot = y_train.detach().numpy()
+    training_data = pd.DataFrame({
+        'x_train': X_train_plot,
+        'y_train': y_train_plot,
+    })
+    training_data.to_csv('paper/kernel_learning_training_data.csv', index=False)
 
     # Plot posterior predictions
     fig1, axes1 = plt.subplots(1, 3, figsize=(18, 5))
