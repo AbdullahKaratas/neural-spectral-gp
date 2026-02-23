@@ -449,7 +449,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         y_train: torch.Tensor,
         epochs: int = 500,
         lr: float = 1e-2,
-        patience: int = 100,
+        patience: Optional[int] = None,
         verbose: bool = True
     ) -> List[float]:
         """
@@ -467,8 +467,8 @@ class FactorizedSpectralDensityNetwork(nn.Module):
             Maximum training epochs
         lr : float
             Learning rate
-        patience : int
-            Early stopping patience
+        patience : int, optional
+            Early stopping patience. If None, no early stopping (default: None)
         verbose : bool
             Print training progress
 
@@ -480,10 +480,12 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         # Optimizer
         optimizer = torch.optim.Adam(self.parameters(), lr=lr, amsgrad=True)
 
-        # Early stopping
+        # Early stopping and best state
         best_loss = float('inf')
         best_state = None
         patience_counter = 0
+        if patience is None:
+            patience = epochs
 
         losses = []
 
@@ -523,7 +525,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
             losses.append(loss.item())
             current_lr = optimizer.param_groups[0]['lr']
 
-            # Early stopping
+            # Early stopping and best state tracking
             if loss.item() < best_loss:
                 best_loss = loss.item()
                 best_state = {k: v.cpu().clone() for k, v in self.state_dict().items()}
@@ -539,7 +541,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
             # Early stopping
             if patience_counter >= patience:
                 if verbose:
-                    print(f"\n✓ Early stopping at epoch {epoch} "
+                    print(f"Early stopping at epoch {epoch} "
                           f"(no improvement for {patience} epochs)")
                 break
 
@@ -548,7 +550,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
             self.load_state_dict(best_state)
             self.best_loss = best_loss
             if verbose:
-                print(f"\n✓ Restored best model (loss: {best_loss:.4f})")
+                print(f"Restored best model (loss: {best_loss:.4f})")
         else:
             self.best_loss = loss.item()
 

@@ -48,7 +48,7 @@ class StandardGP:
         with torch.no_grad():
             return self.model.covar_module(X1, X2).to_dense()
 
-    def fit(self, X_train: torch.Tensor, y_train: torch.Tensor, epochs: int = 100, lr: float = 0.1, verbose: bool = True):
+    def fit(self, X_train: torch.Tensor, y_train: torch.Tensor, epochs: int = 100, lr: float = 0.1, patience: int = None, verbose: bool = True):
         """
         Optimize hyperparameters.
         """
@@ -61,6 +61,13 @@ class StandardGP:
 
         mll = gpytorch.mlls.ExactMarginalLogLikelihood(self.likelihood, self.model)
 
+        # Early stopping and best state
+        best_loss = float('inf')
+        best_state = None
+        patience_counter = 0
+        if patience is None:
+            patience = epochs
+
         losses = []
         for i in range(epochs):
             # Zero gradients from previous iteration
@@ -70,14 +77,39 @@ class StandardGP:
             # Calc loss and backprop gradients
             loss = -mll(output, y_train)
             loss.backward()
-            if verbose and (i % 100 == 0 or i == epochs - 1):
-                print(f"Epoch {i}: Loss = {loss.item():.4f}")
             optimizer.step()
             losses.append(loss.item())
 
-        if verbose:
-            print(f"Standard GP Optimization finished.")
-            print(f"  Final Loss: {loss.item():.4f}")
+            # Early stopping and best state tracking
+            if loss.item() < best_loss:
+                best_loss = loss.item()
+                best_state = {k: v.cpu().clone() for k, v in self.model.state_dict().items()}
+                patience_counter = 0
+            else:
+                patience_counter += 1
+
+            # Print progress
+            if verbose and (i % 100 == 0 or i == epochs - 1):
+                print(f"Epoch {i}: Loss = {loss.item():.4f} | Best: {best_loss:.4f}")
+
+            # Early stopping
+            if patience_counter >= patience:
+                if verbose:
+                    print(f"Early stopping at epoch {i} (no improvement for {patience} epochs)")
+                break
+
+        # Restore best model and store best loss
+        if best_state is not None:
+            self.model.load_state_dict(best_state)
+            self.best_loss = best_loss
+            if verbose:
+                print(f"Standard GP Optimization finished.")
+                print(f"  Best Loss: {best_loss:.4f}")
+        else:
+            self.best_loss = loss.item()
+            if verbose:
+                print(f"Standard GP Optimization finished.")
+                print(f"  Final Loss: {loss.item():.4f}")
 
         return losses
 
