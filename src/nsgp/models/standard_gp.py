@@ -57,7 +57,7 @@ class StandardGP:
         self.model.train()
         self.likelihood.train()
 
-        optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
+        optimizer = torch.optim.Adam(self.model.parameters(), lr=lr, amsgrad=True)
 
         mll = gpytorch.mlls.ExactMarginalLogLikelihood(self.likelihood, self.model)
 
