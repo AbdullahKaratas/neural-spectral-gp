@@ -41,10 +41,9 @@ class FactorizedSpectralDensityNetwork(nn.Module):
     omega_max : float
         Frequency cutoff
     activation : str
-        Activation function ('relu', 'elu', 'tanh')
+        Activation function ('relu', 'elu', 'tanh'). Default: 'relu'
     enforce_symmetry : bool
-        If True, enforce f(omega) = f(-omega) to guarantee s(-omega,-omega') = s(omega,omega').
-        If False, use f(omega) directly (useful for debugging). Default: True.
+        If True, enforce f(omega) = f(-omega). Default: False.
     """
 
     def __init__(
@@ -54,8 +53,8 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         rank: int = 10,
         n_features: int = 50,
         omega_max: float = 8.0,
-        activation: str = 'elu',
-        enforce_symmetry: bool = True,
+        activation: str = 'relu',
+        enforce_symmetry: bool = False,
         learn_log_scale: bool = True,
     ):
         super().__init__()
