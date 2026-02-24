@@ -61,27 +61,30 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         self.input_dim = input_dim
         self.hidden_dims = hidden_dims
         self.rank = rank
-        self.n_features = n_features
+        self._n_features_raw = n_features
         self.omega_max = omega_max
         self.enforce_symmetry = enforce_symmetry
         self.learn_log_scale = learn_log_scale
         self.activation = activation
 
-        # Frequency grid for low-rank NFF (optional, created if None)
-        spacing = omega_max / self.n_features
+        # Frequency grid for low-rank NFF
         if enforce_symmetry:
+            self.n_features = self._n_features_raw
+            spacing = omega_max / self.n_features
             self.register_buffer(
                 "omega_grid",
                 torch.arange(0, self.n_features).reshape(-1, 1).float()
                 * spacing,
             )
         else:
-            spacing *= 2.0
+            k = (self.n_features + 1) // 2
+            spacing = omega_max / float(k)
             self.register_buffer(
                 "omega_grid",
-                torch.arange(-int(self.n_features/2) + 1, int(self.n_features/2)).reshape(-1, 1).float()
+                torch.arange(-k + 1, k).reshape(-1, 1).float()
                 * spacing,
             )
+            self.n_features = 2 * k - 1
 
         # Learnable global scale (log variance)
         # Initialize to 0.0 for unit signal variance (exp(0) = 1.0) when targets are standardized
