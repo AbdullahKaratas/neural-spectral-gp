@@ -28,6 +28,7 @@ dependencies = [
 develop = [
     "pre-commit>=2.8.2",
     "pandas",
+    "seaborn",
 ]
 
 # all dependencies (mandatory and optional)

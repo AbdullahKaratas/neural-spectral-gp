@@ -56,7 +56,7 @@ class LocalStationaryKernel:
         return add_mat * dist_mat
 
     def spectral(self, omega1, omega2):
-        add_mat = self._sq_exp(omega1 / 2.0, omega1 / 2.0, dist=False)
+        add_mat = self._sq_exp(omega1 / 2.0, omega2 / 2.0, dist=False)
         add_mat.mul_(-0.5).div_(self.a).exp_()
 
         dist_mat = self._sq_exp(omega1, omega2, dist=True)

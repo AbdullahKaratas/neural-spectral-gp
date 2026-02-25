@@ -105,7 +105,7 @@ class NonstationaryFeatures:
                 warn("Same spacing of x1 and x2 is assumed")
                 b2 = torch.cos(omega.reshape(-1, 1) * x2.reshape(1, -1))
                 # Correction for zero-th element
-                b2[0, :] *= 0.5 * b2[0, :]
+                b2[0, :] *= 0.5
                 return kernel_root.matmul(matrix_root.transpose(0, 1)).matmul(b2)
             else:
                 warn("Same spacing of x1 and x2 is assumed")
