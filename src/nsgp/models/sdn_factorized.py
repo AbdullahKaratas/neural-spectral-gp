@@ -78,7 +78,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
                 * spacing,
             )
         else:
-            k = (self.n_features + 1) // 2
+            k = (self._n_features_raw + 1) // 2
             spacing = omega_max / float(k)
             self.register_buffer(
                 "omega_grid",
@@ -194,7 +194,6 @@ class FactorizedSpectralDensityNetwork(nn.Module):
             try:
                 L = torch.linalg.cholesky(A_jittered)
                 if attempt > 0:
-                    import warnings
                     warnings.warn(
                         f"Cholesky succeeded with jitter={current_jitter:.1e} after {attempt + 1} attempts"
                     )
@@ -260,6 +259,9 @@ class FactorizedSpectralDensityNetwork(nn.Module):
             Low-rank feature matrix where K = LL^T
         """
         # Input validation
+        if X.shape[1] != 1:
+            raise NotImplementedError("compute_lowrank_features only supports 1D inputs (X.shape[1] == 1).")
+
         if not torch.is_floating_point(X):
             raise TypeError(f"X must be floating point tensor, got {X.dtype}")
 
@@ -292,7 +294,6 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         constraint_rhs = n_pts * delta_x
 
         if constraint_lhs < constraint_rhs:
-            import warnings
             warnings.warn(
                 f"Frequency grid may be too coarse: pi/spacing = {constraint_lhs:.4f} < n*delta_x = {constraint_rhs:.4f}. "
                 f"Consider using at least {int(np.ceil(self.omega_grid.max().item() / (np.pi / constraint_rhs)))+1} frequency points."
@@ -387,7 +388,6 @@ class FactorizedSpectralDensityNetwork(nn.Module):
             raise ValueError(f"L and y must be on same device, got L on {L.device} and y on {y.device}")
 
         if r > n:
-            import warnings
             warnings.warn(
                 f"Rank r={r} exceeds number of data points n={n}. "
                 f"Low-rank approximation is inefficient in this regime. Consider r <= n."

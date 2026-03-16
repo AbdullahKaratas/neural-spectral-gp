@@ -103,7 +103,7 @@ for fname, obj in file_map.items():
 # Save mesh points for spectral density and kernel overlays
 mesh_points_omega = np.column_stack([omega_mesh_x.flatten(), omega_mesh_y.flatten()])
 mesh_points_x = np.column_stack([x_mesh_x.flatten(), x_mesh_y.flatten()])
-np.savetxt("data/hmk_omega_mesh_points.dat", mesh_points_omega, fmt="%.6f")
+np.savetxt(DATA_DIR / "hmk_omega_mesh_points.dat", mesh_points_omega, fmt="%.6f")
 
 # Generate PNG figures for tikz
 dpi = 300
@@ -132,7 +132,7 @@ ax.imshow(
 ax.axis("off")
 plt.subplots_adjust(left=0, right=1, top=1, bottom=0)
 plt.savefig(
-    "data/hmk_spectral_real.png", dpi=dpi, bbox_inches="tight", pad_inches=0
+    DATA_DIR / "hmk_spectral_real.png", dpi=dpi, bbox_inches="tight", pad_inches=0
 )
 plt.close()
 
@@ -152,7 +152,7 @@ ax.imshow(
 ax.axis("off")
 plt.subplots_adjust(left=0, right=1, top=1, bottom=0)
 plt.savefig(
-    "data/hmk_spectral_imag.png", dpi=dpi, bbox_inches="tight", pad_inches=0
+    DATA_DIR / "hmk_spectral_imag.png", dpi=dpi, bbox_inches="tight", pad_inches=0
 )
 plt.close()
 
@@ -170,7 +170,7 @@ ax.imshow(
 ax.axis("off")
 plt.subplots_adjust(left=0, right=1, top=1, bottom=0)
 plt.savefig(
-    "data/hmk_spectral_abs.png", dpi=dpi, bbox_inches="tight", pad_inches=0
+    DATA_DIR / "hmk_spectral_abs.png", dpi=dpi, bbox_inches="tight", pad_inches=0
 )
 plt.close()
 
@@ -189,7 +189,7 @@ ax.imshow(
 )
 ax.axis("off")
 plt.subplots_adjust(left=0, right=1, top=1, bottom=0)
-plt.savefig("data/hmk_k_true.png", dpi=dpi, bbox_inches="tight", pad_inches=0)
+plt.savefig(DATA_DIR / "hmk_k_true.png", dpi=dpi, bbox_inches="tight", pad_inches=0)
 plt.close()
 
 # Approximated kernel
@@ -208,7 +208,7 @@ ax.imshow(
 ax.axis("off")
 plt.subplots_adjust(left=0, right=1, top=1, bottom=0)
 plt.savefig(
-    "data/hmk_k_estimate.png", dpi=dpi, bbox_inches="tight", pad_inches=0
+    DATA_DIR / "hmk_k_estimate.png", dpi=dpi, bbox_inches="tight", pad_inches=0
 )
 plt.close()
 
@@ -227,5 +227,5 @@ ax.imshow(
 )
 ax.axis("off")
 plt.subplots_adjust(left=0, right=1, top=1, bottom=0)
-plt.savefig("data/hmk_error.png", dpi=dpi, bbox_inches="tight", pad_inches=0)
+plt.savefig(DATA_DIR / "hmk_error.png", dpi=dpi, bbox_inches="tight", pad_inches=0)
 plt.close()

@@ -1,3 +1,4 @@
+import math
 from typing import Optional, Callable
 import torch
 from warnings import warn
@@ -85,6 +86,8 @@ class NonstationaryFeatures:
             torch.manual_seed(seed)
         kernel_root = self.lowrank(x1=x1, spacing=spacing, **kwargs)
         rvs = torch.randn(kernel_root.shape[1], n_samples, dtype=kernel_root.dtype)
+        if not self.spectral_real:
+            rvs /= math.sqrt(2)
         return kernel_root.matmul(rvs).T
 
     def kernel_estimate(
