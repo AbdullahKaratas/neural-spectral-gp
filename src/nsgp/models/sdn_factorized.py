@@ -1,20 +1,22 @@
 """
 Factorized Spectral Density Network (SDN-F)
 
-This version GUARANTEES positive definiteness by using a low-rank factorization:
-    s(ω, ω') = Σᵢ fᵢ(ω) · fᵢ(ω')
+This version guarantees positive semi-definiteness by using a low-rank factorization:
+   s(omega, omega') = [f(omega)^T f(omega') + f(-omega)^T f(-omega')]
 
-where fᵢ are learned feature functions. This ensures s is positive semi-definite
-by construction, enabling reliable sampling.
+where f are learned feature functions. This ensures s is positive semi-definite
+by construction and s(omega, omega') = s(omega', omega) = s(-omega, -omega').
 
 Authors: Abdullah Karatas, Arsalan Jawaid
 """
 
+import math
+import warnings
+
 import torch
 import torch.nn as nn
 import numpy as np
-from typing import Optional, List, Tuple
-from .nffs import NFFs
+from typing import Optional, List
 
 
 class FactorizedSpectralDensityNetwork(nn.Module):
@@ -22,10 +24,10 @@ class FactorizedSpectralDensityNetwork(nn.Module):
     SDN with guaranteed positive definiteness through low-rank factorization.
 
     Architecture:
-        ω → MLP → [f₁(ω), f₂(ω), ..., fᵣ(ω)]  (r = rank)
-        s(ω, ω') = Σᵢ fᵢ(ω) · fᵢ(ω')
+        ω → MLP → f(omega) in R^r
+        s(omega, omega') = [f(omega)^T f(omega') + f(-omega)^T f(-omega')]
 
-    This guarantees s is PSD, so Cholesky decomposition always works!
+    This guarantees PSD
 
     Parameters
     ----------
@@ -40,10 +42,9 @@ class FactorizedSpectralDensityNetwork(nn.Module):
     omega_max : float
         Frequency cutoff
     activation : str
-        Activation function ('relu', 'elu', 'tanh')
+        Activation function ('relu', 'elu', 'tanh'). Default: 'relu'
     enforce_symmetry : bool
-        If True, enforce f(omega) = f(-omega) to guarantee s(-omega,-omega') = s(omega,omega').
-        If False, use f(omega) directly (useful for debugging). Default: True.
+        If True, enforce f(omega) = f(-omega). Default: False.
     """
 
     def __init__(
@@ -53,23 +54,67 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         rank: int = 10,
         n_features: int = 50,
         omega_max: float = 8.0,
-        activation: str = 'elu',
-        enforce_symmetry: bool = True
+        activation: str = 'relu',
+        enforce_symmetry: bool = False,
+        learn_log_scale: bool = True,
     ):
         super().__init__()
         self.input_dim = input_dim
         self.hidden_dims = hidden_dims
         self.rank = rank
-        self.n_features = n_features
+        self._n_features_raw = n_features
         self.omega_max = omega_max
         self.enforce_symmetry = enforce_symmetry
+        self.learn_log_scale = learn_log_scale
+        self.activation = activation
+
+        # Frequency grid for low-rank NFF
+        if enforce_symmetry:
+            self.n_features = self._n_features_raw
+            spacing = omega_max / self.n_features
+            self.register_buffer(
+                "omega_grid",
+                torch.arange(0, self.n_features).reshape(-1, 1).float()
+                * spacing,
+            )
+        else:
+            k = (self._n_features_raw + 1) // 2
+            spacing = omega_max / float(k)
+            self.register_buffer(
+                "omega_grid",
+                torch.arange(-k + 1, k).reshape(-1, 1).float()
+                * spacing,
+            )
+            self.n_features = 2 * k - 1
 
         # Learnable global scale (log variance)
-        # Initialize to -2.0 for moderate initial scale (exp(-2) ≈ 0.135)
-        self.log_scale = nn.Parameter(torch.tensor(-2.0))
+        # Initialize to 0.0 for unit signal variance (exp(0) = 1.0) when targets are standardized
+        if learn_log_scale:
+            self.log_scale = nn.Parameter(torch.tensor(0.0))
+        else:
+            self.register_buffer(
+                "log_scale",
+                torch.tensor(0.0)
+            )
 
-        # MLP: ω → feature vector f(ω) ∈ ℝʳ
-        # This is the core of the low-rank factorization
+        # Learnable noise variance (log scale for numerical stability)
+        # Initialize to log(0.5^2) for noise_std = 0.5
+        self.log_noise_var = nn.Parameter(torch.tensor(math.log(0.25)))
+
+        self.feature_net = self._build_mlp(input_dim, rank, hidden_dims, activation)
+        self.best_loss = None
+
+        # Initialize with Xavier (better than std=0.01)
+        self._init_weights()
+
+    def _build_mlp(
+        self,
+        input_dim: int,
+        output_dim: int,
+        hidden_dims: List[int],
+        activation: str
+    ) -> nn.Sequential:
+        """Build an MLP network."""
         layers = []
         prev_dim = input_dim
 
@@ -78,27 +123,28 @@ class FactorizedSpectralDensityNetwork(nn.Module):
             layers.append(self._get_activation(activation))
             prev_dim = hidden_dim
 
-        # Output: r-dimensional feature vector
-        layers.append(nn.Linear(prev_dim, rank))
+        # Output layer
+        layers.append(nn.Linear(prev_dim, output_dim))
 
-        # Add final activation to bound features and prevent explosion
-        # Tanh bounds to [-1, 1], helping with stable training
-        layers.append(nn.Tanh())
-
-        self.feature_net = nn.Sequential(*layers)
-
-        # Initialize with Xavier (better than std=0.01)
-        self._init_weights()
+        return nn.Sequential(*layers)
 
     def _init_weights(self):
-        """Initialize with Xavier uniform for stable training."""
+        act = self.activation
+
         for m in self.modules():
             if isinstance(m, nn.Linear):
-                # Xavier initialization - good default for tanh/sigmoid activations
-                # gain=1.0 for tanh (default)
-                nn.init.xavier_uniform_(m.weight, gain=1.0)
+                if act in ("relu", "elu"):
+                    nn.init.kaiming_normal_(m.weight, mode="fan_in", nonlinearity="relu")
+                elif act == "tanh":
+                    nn.init.xavier_uniform_(m.weight, gain=nn.init.calculate_gain("tanh"))
+                else:
+                    nn.init.xavier_uniform_(m.weight, gain=1.0)
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
+
+        last = [m for m in self.feature_net.modules() if isinstance(m, nn.Linear)][-1]
+        with torch.no_grad():
+            last.weight.mul_(0.05)
 
     def _get_activation(self, activation: str) -> nn.Module:
         """Get activation function."""
@@ -148,7 +194,6 @@ class FactorizedSpectralDensityNetwork(nn.Module):
             try:
                 L = torch.linalg.cholesky(A_jittered)
                 if attempt > 0:
-                    import warnings
                     warnings.warn(
                         f"Cholesky succeeded with jitter={current_jitter:.1e} after {attempt + 1} attempts"
                     )
@@ -165,8 +210,8 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         r"""
         Compute feature vector f(\omega).
 
-        If enforce_symmetry=True, enforces f(\omega) = f(-\omega) to ensure:
-        s(-\omega, -\omega') = s(\omega, \omega')
+        If enforce_symmetry=True:
+            Enforces f(omega) = f(-omega)
 
         Parameters
         ----------
@@ -176,122 +221,54 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         Returns
         -------
         features : torch.Tensor, shape (n, r)
-            Feature vectors (symmetrized if enforce_symmetry=True)
+            Feature vectors
         """
         if omega.dim() == 1:
             omega = omega.unsqueeze(0)
 
         if self.enforce_symmetry:
-            # Symmetrize: f(\omega) = [\tilde{f}(\omega) + \tilde{f}(-\omega)] / 2
+            # Symmetrize: f(omega) = [tilde{f}(omega) + tilde{f}(-omega)] / 2
             f = (self.feature_net(omega) + self.feature_net(-omega)) / 2.0
         else:
-            # Use features directly (for debugging or experimenting with weaker constraints)
             f = self.feature_net(omega)
-            
+
         if torch.isnan(f).any():
-             print("compute_features produced NaNs!")
-             print(f"omega stats: {omega.min()}/{omega.max()}")
+            warnings.warn("compute_features produced NaNs!")
 
         return f
-
-    def _compute_spectral_density_matrix(
-        self,
-        omega_grid: torch.Tensor
-    ) -> torch.Tensor:
-        """
-        Compute spectral density matrix S[m,n] = s(omega_m, omega_n).
-
-        Uses factorized representation: s(omega, omega') = f(omega)^T f(omega')
-        This guarantees S is positive semi-definite.
-
-        Parameters
-        ----------
-        omega_grid : torch.Tensor, shape (M, d)
-            Frequency grid points
-
-        Returns
-        -------
-        S : torch.Tensor, shape (M, M)
-            Spectral density matrix
-        """
-        f = self.compute_features(omega_grid)  # (M, r)
-        S = f @ f.T  # (M, M)
-        return S
-
-    def forward(self, omega1: torch.Tensor, omega2: torch.Tensor) -> torch.Tensor:
-        """
-        Compute s(ω₁, ω₂) = f(ω₁)ᵀ f(ω₂).
-
-        This is GUARANTEED to be positive semi-definite!
-
-        Parameters
-        ----------
-        omega1, omega2 : torch.Tensor
-            Frequency pairs
-
-        Returns
-        -------
-        s : torch.Tensor
-            Spectral density values
-        """
-        # Compute features
-        f1 = self.compute_features(omega1)  # (n, r)
-        f2 = self.compute_features(omega2)  # (m, r)
-
-        # s(ω₁, ω₂) = f(ω₁)ᵀ f(ω₂)
-        # This is already ≥ 0 by construction, no need to add constant!
-        s = torch.sum(f1 * f2, dim=-1)  # (n,) or (n, m) if broadcasting
-
-        return s
 
     def compute_lowrank_features(
         self,
         X: torch.Tensor,
-        omega_grid: torch.Tensor,
     ) -> torch.Tensor:
         r"""
         Compute low-rank feature matrix L using nonstationary Fourier features.
 
-        This computes K = LL^T where K = B S^{1/2} (S^{1/2})^T B^T
-        - B[i,m] = cos(omega_m x_i) is the cosine basis
-        - S[m,n] = s(omega_m, omega_n) \Delta omega^2 is the spectral process kernel
-        - S^{1/2} is the matrix square root of S
+        This computes K ~= LL^T
 
-        Mathematical Background
-        -----------------------
-        Computes K = LL^T via bivariate spectral representation:
-            k(x,x') = ∫∫ s(ω,ω') cos(ωx - ω'x') dω dω'
-
-        With low-rank factorization s(ω,ω') = f(ω)^T f(ω'), this becomes:
-            L = B @ S^{1/2}  where B[i,m] = cos(ω_m x_i), S = F F^T
-
-        See paper Section 3 for full mathematical derivation.
-
-        Frequency Grid Constraint
-        -------------------------
-        Grid spacing Δω must satisfy: π/Δω ≥ n·Δx (conservative bound)
-        to avoid periodicity artifacts. See paper for details.
+        Grid spacing Δω must satisfy: π/Δω ≥ n·Δx (aliasing)
 
         Parameters
         ----------
         X : torch.Tensor, shape (n, d)
             Spatial locations
-        omega_grid : torch.Tensor, shape (num_freqs, d)
-            Frequency grid points (should start from 0 for real spectral density)
 
         Returns
         -------
-        L : torch.Tensor, shape (n, num_freqs)
+        L : torch.Tensor, shape (n, r) or (n, 2r) if use_symmetrized_density=True
             Low-rank feature matrix where K = LL^T
         """
         # Input validation
+        if X.shape[1] != 1:
+            raise NotImplementedError("compute_lowrank_features only supports 1D inputs (X.shape[1] == 1).")
+
         if not torch.is_floating_point(X):
             raise TypeError(f"X must be floating point tensor, got {X.dtype}")
 
-        if not torch.is_floating_point(omega_grid):
-            raise TypeError(f"omega_grid must be floating point tensor, got {omega_grid.dtype}")
+        if not torch.is_floating_point(self.omega_grid):
+            raise TypeError(f"omega_grid must be floating point tensor, got {self.omega_grid.dtype}")
 
-        num_freqs = omega_grid.shape[0]
+        num_freqs = self.omega_grid.shape[0]
         n_pts = X.shape[0]
 
         # Validate minimum requirements
@@ -312,104 +289,53 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         spacings = X_sorted[1:] - X_sorted[:-1]
         delta_x = spacings.min().item()
 
-        spacing = torch.norm(omega_grid[1] - omega_grid[0]).item()
+        spacing = torch.norm(self.omega_grid[1] - self.omega_grid[0]).item()
         constraint_lhs = np.pi / spacing
         constraint_rhs = n_pts * delta_x
 
         if constraint_lhs < constraint_rhs:
-            import warnings
             warnings.warn(
                 f"Frequency grid may be too coarse: pi/spacing = {constraint_lhs:.4f} < n*delta_x = {constraint_rhs:.4f}. "
-                f"Consider using at least {int(np.ceil(omega_grid.max().item() / (np.pi / constraint_rhs)))+1} frequency points."
+                f"Consider using at least {int(np.ceil(self.omega_grid.max().item() / (np.pi / constraint_rhs)))+1} frequency points."
             )
 
-        # Compute spectral density matrix S[m,n] = s(omega_m, omega_n)
-        S = self._compute_spectral_density_matrix(omega_grid)  # (num_freqs, num_freqs)
+        # Compute low rank features
+        F_pos = self.compute_features(self.omega_grid)   # (num_freqs, r)
+        if not self.enforce_symmetry:
+            F_neg = self.compute_features(-self.omega_grid)  # (num_freqs, r)
 
-        # Apply principled scaling (in-place to save memory)
-        S *= (spacing ** 2)
-
-        # Compute matrix square root via eigendecomposition
-        # This is more stable than Cholesky for spectral matrices
-        eigenvalues, eigenvectors = torch.linalg.eigh(S)
-
-        # Check for problematic eigenvalues before clamping
-        negative_count = (eigenvalues < 0).sum().item()
-
-        if negative_count > 0:
-            max_negative = eigenvalues[eigenvalues < 0].min().item()
-
-            if abs(max_negative) > 1e-6:  # Significant negative eigenvalue
-                raise ValueError(
-                    f"Spectral density matrix has {negative_count} significantly negative eigenvalues "
-                    f"(worst: {max_negative:.2e}). This indicates a bug in the factorization - "
-                    f"S = f @ f.T should be PSD by construction."
-                )
-            else:  # Small numerical errors only
-                import warnings
-                warnings.warn(
-                    f"Clamped {negative_count} small negative eigenvalues (worst: {max_negative:.2e}). "
-                    f"This is likely due to numerical precision."
-                )
-
-        # Clamp negative eigenvalues (from numerical errors) to small positive value
-        eigenvalues = torch.clamp(eigenvalues, min=1e-10)
-
-        # S_sqrt = Q @ sqrt(Lambda) @ Q^T, but we only need S_sqrt for multiplication
-        # S_sqrt such that S_sqrt @ S_sqrt^T = S
-        S_sqrt = eigenvectors @ torch.diag(torch.sqrt(eigenvalues))
-
-        # Compute BOTH cosine and sine bases
-        # Using the addition theorem: cos(ωx - ω'x') = cos(ωx)cos(ω'x') + sin(ωx)sin(ω'x')
-        # We need BOTH terms for the complete kernel representation!
-        #
-        # X: (n, d), omega_grid: (num_freqs, d) -> phases: (n, num_freqs)
-        phases = X @ omega_grid.T  # (n, num_freqs)
+        # Compute cosine basis
+        # X: (n, d), self.omega_grid: (num_freqs, d) -> phases: (n, num_freqs)
+        phases = X @ self.omega_grid.T  # (n, num_freqs)
         B_cos = torch.cos(phases)  # (n, num_freqs)
-        B_sin = torch.sin(phases)  # (n, num_freqs)
+        if not self.enforce_symmetry:
+            B_sin = torch.sin(phases)  # (n, num_freqs)
 
         # Correction for zero frequency (Trapezoidal rule boundary)
         # At ω=0, the weight should be 0.5 * dω (trapezoidal rule for boundary points).
         # Since K ~ L*L^T, multiplying B by 0.5 results in 0.25 weight for the (0,0) corner term in 2D integration.
         # This helps the network learn a smooth f(ω) without needing to learn a discontinuity at 0.
         # Note: We don't apply 0.5 at ω_max because spectral density → 0 there (negligible contribution).
-        omega_norms = torch.norm(omega_grid, dim=1)  # (num_freqs,)
+        omega_norms = torch.norm(self.omega_grid, dim=1)  # (num_freqs,)
         is_zero = omega_norms < 1e-10
         if torch.any(is_zero):
             B_cos[:, is_zero] = 0.5
-            B_sin[:, is_zero] = 0.0
+            if not self.enforce_symmetry:
+                B_sin[:, is_zero] = 0.0
 
-        # Compute low-rank features for BOTH bases
-        # S already includes (Δω)² scaling
-        #
-        # COMPLETE KERNEL WITH ADDITION THEOREM:
-        # k(x,x') = ∫∫ s(ω,ω') cos(ωx - ω'x') dω dω'
-        #         = ∫∫ s(ω,ω') [cos(ωx)cos(ω'x') + sin(ωx)sin(ω'x')] dω dω'
-        #         = k_cos(x,x') + k_sin(x,x')
-        #
-        # With s(ω,ω') = f(ω)^T f(ω') and L_cos = B_cos @ S^{1/2}, L_sin = B_sin @ S^{1/2}:
-        # k_cos = L_cos @ L_cos^T
-        # k_sin = L_sin @ L_sin^T
-        # k = k_cos + k_sin = [L_cos, L_sin] @ [L_cos, L_sin]^T = L @ L^T
-        #
-        # NO FACTOR OF 2 NEEDED! The math is clean with both bases.
-        L_cos = B_cos @ S_sqrt  # (n, num_freqs)
-        L_sin = B_sin @ S_sqrt  # (n, num_freqs)
-
-        # Combine into single feature matrix: L = [L_cos, L_sin]
-        # This gives K = L @ L^T = L_cos @ L_cos^T + L_sin @ L_sin^T automatically
-        L = torch.cat([L_cos, L_sin], dim=1)  # (n, 2*num_freqs)
-
-        # EMPIRICAL NOTE: We do NOT multiply L by 2.0 here.
-        # The network learns to absorb the integration factors (from ℝ² vs ℝ₊²)
-        # into the feature magnitudes directly via the MLP and log_scale parameter.
-        # This provides better optimization stability (99% error vs 373% with explicit factor 2).
-        #
-        # Mathematical interpretation: The network implicitly learns s̃(ω,ω') ≈ 4·s(ω,ω'),
-        # which is equivalent due to identification ambiguity in the spectral density.
+        psi_real = B_cos @ F_pos * spacing
+        if self.enforce_symmetry:
+            L = math.sqrt(2.0) * psi_real
+        else:
+            psi_imag = B_sin @ F_pos * spacing
+            psi_neg_real = B_cos @ F_neg * spacing
+            psi_neg_imag = B_sin @ F_neg * spacing
+            L = math.sqrt(2.0) * torch.cat(
+                [psi_real, psi_imag, psi_neg_real, psi_neg_imag], dim=1
+            )
 
         # Apply learnable scale: L_scaled = sqrt(theta) * L
-        L *= torch.exp(0.5 * self.log_scale)  # Inplace operation
+        L *= torch.exp(0.5 * self.log_scale)
 
         return L
 
@@ -462,7 +388,6 @@ class FactorizedSpectralDensityNetwork(nn.Module):
             raise ValueError(f"L and y must be on same device, got L on {L.device} and y on {y.device}")
 
         if r > n:
-            import warnings
             warnings.warn(
                 f"Rank r={r} exceeds number of data points n={n}. "
                 f"Low-rank approximation is inefficient in this regime. Consider r <= n."
@@ -495,413 +420,29 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         log_det_W = 2 * torch.sum(torch.log(torch.diag(Lw)))  # log|W| = 2·sum(log(diag(Lw)))
         log_det = log_det_sigma + log_det_W
 
-        # Negative log marginal likelihood (up to constant and scaling)
-        # NOTE: This is proportional to the true NLL. We omit:
-        #   - 0.5 factor (doesn't affect optimization)
-        #   - n log(2 pi) constant term (doesn't affect optimization)
-        # Full NLL = 0.5 * (data_fit + log_det) + 0.5*n*log(2 pi)
-        nll = data_fit + log_det
+        # Negative log marginal likelihood
+        nll = 0.5 * (data_fit + log_det + n * math.log(2.0 * math.pi))
 
         return nll
 
-    def compute_covariance_mc(
+    def compute_covariance(
         self,
         X1: torch.Tensor,
         X2: Optional[torch.Tensor] = None,
-        noise_var: float = 1e-6,
-        n_samples: int = 50
     ) -> torch.Tensor:
-        """
-        Compute covariance using Monte Carlo integration (FAST for training!).
-
-        CORRECT MATHEMATICAL FORMULATION:
-        K[i,j] = ∫∫ s(ω, ω') cos(ωx_i - ω'x_j) dω dω'
-
-        This automatically includes BOTH cos·cos and sin·sin terms via addition theorem:
-        cos(ωx - ω'x') = cos(ωx)cos(ω'x') + sin(ωx)sin(ω'x')
-
-        We integrate over positive frequencies only: ω, ω' ∈ [0, ∞)
-        Factor of 4 accounts for symmetry: ∫_{-∞}^{∞} = 2·∫_0^{∞}
-
-        Parameters
-        ----------
-        X1 : torch.Tensor, shape (n1, d)
-            First set of spatial locations
-        X2 : torch.Tensor, shape (n2, d), optional
-            Second set of spatial locations (if None, use X1)
-        noise_var : float
-            Observation noise variance
-        n_samples : int
-            Number of Monte Carlo frequency samples
-
-        Returns
-        -------
-        K : torch.Tensor, shape (n1, n2) or (n1, n1)
-            Covariance matrix
-        """
         if X1.dim() == 1:
             X1 = X1.unsqueeze(-1)
+
+        L1 = self.compute_lowrank_features(X1)
+
         if X2 is None:
-            X2 = X1
-            add_noise = True
+            return L1 @ L1.T
         else:
             if X2.dim() == 1:
                 X2 = X2.unsqueeze(-1)
-            add_noise = False
+            L2 = self.compute_lowrank_features(X2)
 
-        n1, n2 = X1.shape[0], X2.shape[0]
-
-        # Sample frequencies uniformly from [0, omega_max] (positive frequencies only)
-        omegas = torch.rand(n_samples, self.input_dim) * self.omega_max
-
-        # Compute FULL spectral density matrix - PSD GUARANTEED!
-        S_full = self._compute_spectral_density_matrix(omegas)  # (n_samples, n_samples)
-
-        # Monte Carlo integration weights
-        dw_mc = self.omega_max / n_samples  # Per-dimension weight
-        volume = dw_mc * dw_mc  # 2D integration volume
-
-        # Compute phase differences: ω·x_i - ω'·x_j
-        # omega_X1: (n_samples, n1), omega_X2: (n_samples, n2)
-        omega_X1 = omegas @ X1.T  # (n_samples, n1)
-        omega_X2 = omegas @ X2.T  # (n_samples, n2)
-
-        # Initialize kernel matrix
-        K = torch.zeros(n1, n2, device=X1.device, dtype=X1.dtype)
-
-        # Monte Carlo integration: K[i,j] = Σ_m Σ_n s(ω_m, ω_n) cos(ω_m·x_i - ω_n·x_j) Δω²
-        # EMPIRICAL NOTE: Factor 4 removed for consistency with low-rank method.
-        # The network learns the scaling implicitly (identification ambiguity).
-        for i in range(n1):
-            for j in range(n2):
-                # Phase difference: ω·x_i - ω'·x_j
-                # omega_X1[:, i]: (n_samples,), omega_X2[:, j]: (n_samples,)
-                phases = omega_X1[:, i:i+1] - omega_X2[:, j:j+1].T  # (n_samples, n_samples)
-
-                # K[i,j] = Σ_m Σ_n s(ω_m, ω_n) cos(phase_mn) · Δω²
-                k_ij = torch.sum(S_full * torch.cos(phases))
-                K[i, j] = volume * k_ij  # NO factor 4 - network learns implicit scaling
-
-        # Apply learnable scale (inplace for memory efficiency)
-        K *= torch.exp(self.log_scale)
-
-        if add_noise:
-            # Enforce symmetry: K should equal K^T but numerical errors can cause small asymmetry
-            K = (K + K.T) / 2.0
-            K += noise_var * torch.eye(n1, device=K.device, dtype=K.dtype)
-
-        return K
-
-    def compute_covariance_deterministic(
-        self,
-        X1: torch.Tensor,
-        X2: Optional[torch.Tensor] = None,
-        noise_var: float = 1e-6
-    ) -> torch.Tensor:
-        """
-        Compute covariance deterministically (ACCURATE for evaluation!).
-
-        Full bivariate spectral density via trapezoidal quadrature:
-        K[i,j] = ∫∫ s(ω, ω') cos(ω·xᵢ - ω'·xⱼ) dω dω'
-               ≈ Σₘ Σₙ s(ωₘ, ωₙ) cos(ωₘ·xᵢ - ωₙ·xⱼ) Δω²
-
-        Parameters
-        ----------
-        X1 : torch.Tensor, shape (n1, d)
-            First set of spatial locations
-        X2 : torch.Tensor, shape (n2, d), optional
-            Second set of spatial locations (if None, use X1)
-        noise_var : float
-            Observation noise variance
-
-        Returns
-        -------
-        K : torch.Tensor, shape (n1, n2) or (n1, n1)
-            Covariance matrix
-        """
-        if X1.dim() == 1:
-            X1 = X1.unsqueeze(-1)
-        if X2 is None:
-            X2 = X1
-            add_noise = True
-        else:
-            if X2.dim() == 1:
-                X2 = X2.unsqueeze(-1)
-            add_noise = False
-
-        n1, n2 = X1.shape[0], X2.shape[0]
-
-        # Compute covariance using low-rank approximation K = LL^T
-        # This is consistent with training and much faster than double integration
-        
-        # Frequency grid
-        omegas = torch.linspace(0, self.omega_max, self.n_features).unsqueeze(-1)
-        
-        # Compute spectral density matrix S
-        S = self._compute_spectral_density_matrix(omegas)
-
-        # Apply spacing scaling
-        # Note: linspace(0, omega_max, n_features) has spacing omega_max / (n_features - 1)
-        dw = self.omega_max / (self.n_features - 1) if self.n_features > 1 else self.omega_max
-        S *= (dw ** 2)
-        
-        # Compute matrix square root
-        eigenvalues, eigenvectors = torch.linalg.eigh(S)
-        eigenvalues = torch.clamp(eigenvalues, min=1e-10)
-        S_sqrt = eigenvectors @ torch.diag(torch.sqrt(eigenvalues))
-
-        # Compute BOTH cosine and sine bases
-        # Using the addition theorem: cos(ωx - ω'x') = cos(ωx)cos(ω'x') + sin(ωx)sin(ω'x')
-        phases1 = X1 @ omegas.T  # (n1, num_freqs)
-        B1_cos = torch.cos(phases1)  # (n1, num_freqs)
-        B1_sin = torch.sin(phases1)  # (n1, num_freqs)
-
-        if X2 is not None:
-            phases2 = X2 @ omegas.T  # (n2, num_freqs)
-            B2_cos = torch.cos(phases2)  # (n2, num_freqs)
-            B2_sin = torch.sin(phases2)  # (n2, num_freqs)
-        else:
-            B2_cos = B1_cos
-            B2_sin = B1_sin
-
-        # Correction for zero frequency
-        # At ω=0: cos(0) = 1, sin(0) = 0
-        omega_norms = torch.norm(omegas, dim=1)
-        is_zero = omega_norms < 1e-10
-        if torch.any(is_zero):
-            B1_cos[:, is_zero] = 0.5
-            B1_sin[:, is_zero] = 0.0
-            B2_cos[:, is_zero] = 0.5
-            B2_sin[:, is_zero] = 0.0
-
-        # Compute low-rank features for BOTH bases
-        # COMPLETE KERNEL: k = k_cos + k_sin = L @ L^T where L = [L_cos, L_sin]
-        L1_cos = B1_cos @ S_sqrt  # (n1, num_freqs)
-        L1_sin = B1_sin @ S_sqrt  # (n1, num_freqs)
-        L2_cos = B2_cos @ S_sqrt  # (n2, num_freqs)
-        L2_sin = B2_sin @ S_sqrt  # (n2, num_freqs)
-
-        # Combine: L = [L_cos, L_sin]
-        L1 = torch.cat([L1_cos, L1_sin], dim=1)  # (n1, 2*num_freqs)
-        L2 = torch.cat([L2_cos, L2_sin], dim=1)  # (n2, 2*num_freqs)
-
-        # EMPIRICAL NOTE: Factor 2 removed based on empirical results.
-        # The network implicitly learns the correct scaling through MLP and log_scale.
-        # This is consistent with compute_lowrank_features used during training.
-
-        # Apply learnable scale: L_scaled = sqrt(θ) * L
-        scale_factor = torch.exp(0.5 * self.log_scale)
-        L1 *= scale_factor  # Inplace operation
-        L2 *= scale_factor  # Inplace operation
-
-        # K = L1 @ L2^T = (L1_cos @ L2_cos^T + L1_sin @ L2_sin^T)
-        K = L1 @ L2.T
-        
-        if add_noise:
-            K = K + noise_var * torch.eye(n1, device=K.device, dtype=K.dtype)
-            
-        return K
-
-    def posterior_mean_loss(
-        self,
-        X_train: torch.Tensor,
-        y_train: torch.Tensor,
-        noise_var: float = 1e-4,
-        use_mc: bool = True,
-        mc_samples: int = 50
-    ) -> torch.Tensor:
-        """
-        Negative log marginal likelihood.
-
-        Assumes y_train ~ GP(0, K + σ²I) where K is determined by s(ω,ω').
-        Goal: Learn s(ω,ω') to maximize marginal likelihood.
-
-        From GPML eq 2.30:
-            -log p(y|X) = ½yᵀK⁻¹y + ½log|K| + (n/2)log(2π)
-
-        HYBRID APPROACH:
-            - Training (use_mc=True): Fast Monte Carlo integration
-            - Evaluation (use_mc=False): Accurate deterministic quadrature
-
-        Parameters
-        ----------
-        X_train : torch.Tensor, shape (n, d)
-            Training inputs
-        y_train : torch.Tensor, shape (n,)
-            Training outputs (zero mean)
-        noise_var : float
-            Observation noise variance
-        use_mc : bool
-            Use Monte Carlo (fast) vs deterministic (accurate)
-        mc_samples : int
-            Number of MC samples (if use_mc=True)
-
-        Returns
-        -------
-        loss : torch.Tensor
-            Negative log marginal likelihood
-        """
-        # Input validation
-        MIN_NOISE_VAR = 1e-8  # Numerical stability threshold
-
-        if noise_var <= 0:
-            raise ValueError(f"noise_var must be positive, got {noise_var}")
-
-        if noise_var < MIN_NOISE_VAR:
-            raise ValueError(
-                f"noise_var={noise_var:.2e} is too small for numerical stability. "
-                f"Minimum allowed: {MIN_NOISE_VAR:.2e}"
-            )
-
-        # Compute covariance - HYBRID!
-        if use_mc:
-            # Fast MC for training
-            K_train = self.compute_covariance_mc(
-                X_train, noise_var=noise_var, n_samples=mc_samples
-            )
-        else:
-            # Accurate deterministic for evaluation
-            K_train = self.compute_covariance_deterministic(
-                X_train, noise_var=noise_var
-            )
-
-        # Add regularization for numerical stability
-        # Use higher jitter for nonstationary kernels with complex structure
-        K_train_reg = K_train + 1e-4 * torch.eye(K_train.shape[0])
-
-        # Cholesky decomposition (should always work with factorized s!)
-        max_attempts = 5
-        jitter = 1e-4
-        for attempt in range(max_attempts):
-            try:
-                L = torch.linalg.cholesky(K_train_reg)
-                break
-            except RuntimeError as e:
-                if attempt == max_attempts - 1:
-                    # Last attempt failed
-                    raise RuntimeError(f"Cholesky failed after {max_attempts} attempts: {e}")
-                # Increase jitter exponentially
-                jitter *= 10
-                K_train_reg = K_train + jitter * torch.eye(K_train.shape[0])
-
-        # Solve K⁻¹y
-        alpha = torch.cholesky_solve(y_train.unsqueeze(-1), L).squeeze()
-
-        # Negative log marginal likelihood (up to constant and scaling)
-        # NOTE: This is proportional to the true NLL. We omit:
-        #   - 0.5 factor (doesn't affect optimization)
-        #   - n log(2 pi) constant term (doesn't affect optimization)
-        # Full NLL = 0.5 * (data_fit + log_det) + 0.5*n*log(2 pi)
-        data_fit = y_train @ alpha
-        log_det = 2 * torch.sum(torch.log(torch.diag(L)))
-        loss = data_fit + log_det
-
-        return loss
-
-    def spectral_smoothness_penalty(self, n_samples: int = 100) -> torch.Tensor:
-        """
-        Encourage smooth spectral density.
-
-        Penalizes large gradients in s(ω, ω').
-        """
-        # Sample random frequencies
-        omegas = torch.rand(n_samples, self.input_dim) * self.omega_max - self.omega_max/2
-        omegas.requires_grad_(True)
-
-        # Compute s at these frequencies
-        s = self.forward(omegas, omegas)
-
-        # Compute gradient
-        grad = torch.autograd.grad(
-            outputs=s.sum(),
-            inputs=omegas,
-            create_graph=True
-        )[0]
-
-        # L2 norm of gradient
-        return torch.mean(grad ** 2)
-
-    def spectral_diversity_penalty(self, omega_grid: torch.Tensor) -> torch.Tensor:
-        """
-        Encourage diverse spectral structure (prevent rank collapse).
-
-        Uses eigenvalue entropy to ensure S has multiple significant eigenvalues
-        instead of collapsing to rank-1 (spectral collapse).
-
-        High entropy = diverse eigenvalues = good ✓
-        Low entropy = rank collapse = bad ✗
-
-        Parameters
-        ----------
-        omega_grid : torch.Tensor, shape (M, d)
-            Frequency grid for computing spectral matrix
-
-        Returns
-        -------
-        penalty : torch.Tensor
-            Negative entropy (minimize to maximize diversity)
-        """
-        S = self._compute_spectral_density_matrix(omega_grid)
-
-        # Eigenvalue decomposition
-        eigenvalues = torch.linalg.eigvalsh(S)
-        eigenvalues = torch.clamp(eigenvalues, min=1e-10)  # Numerical stability
-
-        # Normalize to probability distribution
-        probs = eigenvalues / eigenvalues.sum()
-
-        # Shannon entropy: H = -Σ pᵢ log(pᵢ)
-        # Higher entropy = more diverse eigenvalues
-        entropy = -(probs * torch.log(probs + 1e-10)).sum()
-
-        # Normalize by max possible entropy (uniform distribution)
-        max_entropy = torch.log(torch.tensor(len(eigenvalues), dtype=torch.float32))
-        normalized_entropy = entropy / max_entropy
-
-        # Return negative (we minimize loss, but want to maximize entropy)
-        # Also subtract from 1 so penalty is positive when diversity is low
-        return 1.0 - normalized_entropy
-
-    def simulate(
-        self,
-        X_new: torch.Tensor,
-        n_samples: int = 1,
-        seed: Optional[int] = None
-    ) -> torch.Tensor:
-        """
-        Simulate from the learned GP prior.
-
-        Since s(ω,ω') is now guaranteed PSD, sampling should always work!
-
-        Parameters
-        ----------
-        X_new : torch.Tensor, shape (n, d)
-            Locations to simulate at
-        n_samples : int
-            Number of sample paths
-        seed : int, optional
-            Random seed
-
-        Returns
-        -------
-        samples : torch.Tensor, shape (n_samples, n)
-            Sample paths from GP prior
-        """
-        # Create NFFs with learned spectral density
-        def spectral_density_fn(w1, w2):
-            return self.forward(w1, w2)
-
-        nffs = NFFs(
-            spectral_density=spectral_density_fn,
-            n_features=self.n_features,
-            omega_max=self.omega_max,
-            input_dim=self.input_dim
-        )
-
-        # Simulate (should work now!)
-        samples = nffs.simulate(X_new, n_samples=n_samples, seed=seed)
-
-        return samples
+        return L1 @ L2.T
 
     def fit(
         self,
@@ -909,28 +450,13 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         y_train: torch.Tensor,
         epochs: int = 500,
         lr: float = 1e-2,
-        noise_var: float = 0.01,
-        use_smoothness: bool = False,
-        lambda_smooth: float = 0.1,
-        use_diversity: bool = True,
-        lambda_diversity: float = 0.1,
-        patience: int = 100,
-        use_lowrank: bool = True,
-        omega_grid: Optional[torch.Tensor] = None,
-        use_mc_training: bool = True,
-        mc_samples: int = 50,
+        patience: Optional[int] = None,
         verbose: bool = True
     ) -> List[float]:
         """
-        Train the factorized SDN.
+        Train the factorized SDN using low-rank NFF approximation.
 
-        TRAINING METHODS:
-            1. Low-rank NFF approximation (use_lowrank=True, default):
-               Uses log_marginal_likelihood with compute_lowrank_features
-
-            2. Full covariance (use_lowrank=False):
-               Uses posterior_mean_loss with full covariance computation
-               Monte Carlo (use_mc_training=True) or deterministic quadrature
+        Uses log_marginal_likelihood with compute_lowrank_features.
 
         Parameters
         ----------
@@ -942,26 +468,8 @@ class FactorizedSpectralDensityNetwork(nn.Module):
             Maximum training epochs
         lr : float
             Learning rate
-        noise_var : float
-            Observation noise variance
-        use_smoothness : bool
-            Enable spectral smoothness penalty (default: False)
-        lambda_smooth : float
-            Smoothness regularization weight (ignored if use_smoothness=False)
-        use_diversity : bool
-            Enable spectral diversity penalty to prevent rank collapse (default: True)
-        lambda_diversity : float
-            Diversity regularization weight (default: 0.1)
-        patience : int
-            Early stopping patience
-        use_lowrank : bool
-            Use low-rank NFF approximation (default: True)
-        omega_grid : torch.Tensor, optional
-            Frequency grid for low-rank method (if None, computes arange(0, n_features)*spacing)
-        use_mc_training : bool
-            Use Monte Carlo for full covariance training (ignored if use_lowrank=True)
-        mc_samples : int
-            Number of MC samples during training (ignored if use_lowrank=True)
+        patience : int, optional
+            Early stopping patience. If None, no early stopping (default: None)
         verbose : bool
             Print training progress
 
@@ -970,26 +478,15 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         losses : List[float]
             Training loss history
         """
-        # Zero-mean the data
-        y_train = y_train - y_train.mean()
-
-        # Prepare omega grid (needed for both low-rank training and diversity regularization)
-        if omega_grid is None:
-            omega_grid = torch.linspace(0, self.omega_max, self.n_features).unsqueeze(-1)
-
         # Optimizer
-        optimizer = torch.optim.Adam(self.parameters(), lr=lr)
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
-            optimizer,
-            T_0=100,
-            T_mult=2,
-            eta_min=lr / 100
-        )
+        optimizer = torch.optim.Adam(self.parameters(), lr=lr, amsgrad=True)
 
-        # Early stopping
+        # Early stopping and best state
         best_loss = float('inf')
         best_state = None
         patience_counter = 0
+        if patience is None:
+            patience = epochs
 
         losses = []
 
@@ -999,42 +496,19 @@ class FactorizedSpectralDensityNetwork(nn.Module):
             print(f"  Rank: {self.rank}")
             print(f"  Epochs: {epochs}")
             print(f"  Initial LR: {lr}")
-            if use_lowrank:
-                print(f"  Method: Low-rank NFF")
-                print(f"  Omega grid: {omega_grid.shape[0]} points from 0 to {self.omega_max}")
-            else:
-                print(f"  Method: {'Monte Carlo (fast)' if use_mc_training else 'Deterministic (accurate)'}")
-                if use_mc_training:
-                    print(f"  MC Samples: {mc_samples}")
+            print(f"  Features: {self.omega_grid.shape[0]}")
             print()
 
         for epoch in range(epochs):
             optimizer.zero_grad()
 
-            # Compute loss using selected method
-            if use_lowrank:
-                # Low-rank NFF
-                L = self.compute_lowrank_features(X_train, omega_grid)
-                data_loss = self.log_marginal_likelihood(L, y_train, noise_var)
-            else:
-                # Full covariance method
-                data_loss = self.posterior_mean_loss(
-                    X_train, y_train,
-                    noise_var=noise_var,
-                    use_mc=use_mc_training,
-                    mc_samples=mc_samples
-                )
+            # Compute loss using low-rank NFF
+            L = self.compute_lowrank_features(X_train)
+            noise_var = torch.exp(self.log_noise_var)
+            data_loss = self.log_marginal_likelihood(L, y_train, noise_var)
 
             # Regularization
             loss = data_loss
-
-            if use_smoothness:
-                smooth_penalty = self.spectral_smoothness_penalty()
-                loss = loss + lambda_smooth * smooth_penalty
-
-            if use_diversity:
-                diversity_penalty = self.spectral_diversity_penalty(omega_grid)
-                loss = loss + lambda_diversity * diversity_penalty
 
             if torch.isnan(loss):
                 if verbose:
@@ -1046,13 +520,12 @@ class FactorizedSpectralDensityNetwork(nn.Module):
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.parameters(), max_norm=1.0)
             optimizer.step()
-            scheduler.step()
 
             # Track
             losses.append(loss.item())
             current_lr = optimizer.param_groups[0]['lr']
 
-            # Early stopping
+            # Early stopping and best state tracking
             if loss.item() < best_loss:
                 best_loss = loss.item()
                 best_state = {k: v.cpu().clone() for k, v in self.state_dict().items()}
@@ -1063,20 +536,57 @@ class FactorizedSpectralDensityNetwork(nn.Module):
             # Print progress
             if verbose and (epoch % 100 == 0 or epoch == epochs - 1):
                 print(f"Epoch {epoch:4d}/{epochs} | Loss: {loss.item():.4f} | "
-                      f"Data: {data_loss.item():.4f} | LR: {current_lr:.6f} | "
                       f"Best: {best_loss:.4f}")
 
             # Early stopping
             if patience_counter >= patience:
                 if verbose:
-                    print(f"\n✓ Early stopping at epoch {epoch} "
+                    print(f"Early stopping at epoch {epoch} "
                           f"(no improvement for {patience} epochs)")
                 break
 
-        # Restore best model
+        # Restore best model and store best loss
         if best_state is not None:
             self.load_state_dict(best_state)
+            self.best_loss = best_loss
             if verbose:
-                print(f"\n✓ Restored best model (loss: {best_loss:.4f})")
+                print(f"Restored best model (loss: {best_loss:.4f})")
+        else:
+            self.best_loss = loss.item()
 
         return losses
+
+    def predict(self, X_test, X_train, y_train, predictive_dist=True):
+        """
+        Posterior prediction using Low-rank approximation.
+        """
+        noise_var = torch.exp(self.log_noise_var).item()
+
+        L = self.compute_lowrank_features(X_train)
+        _, rank_4r = L.shape
+
+        G = L.T @ L
+        M = noise_var * torch.eye(rank_4r, device=L.device) + G
+        M_chol = torch.linalg.cholesky(M)
+
+        Lty = L.T @ y_train
+        M_inv_Lty = torch.cholesky_solve(Lty.unsqueeze(-1), M_chol).squeeze(-1)
+        beta = (Lty - G @ M_inv_Lty) / noise_var
+
+        M_inv_G = torch.cholesky_solve(G, M_chol)
+        LtSigmaInvL = (G - G @ M_inv_G) / noise_var
+        Q = torch.eye(rank_4r, device=L.device) - LtSigmaInvL
+
+        L_star = self.compute_lowrank_features(X_test)
+
+        # Posterior mean and variance
+        mean = L_star @ beta
+
+        L_star_Q = L_star @ Q
+        var = torch.sum(L_star_Q * L_star, dim=1)
+        if predictive_dist:
+            var += noise_var
+        var = torch.clamp(var, min=1e-6)
+        std = torch.sqrt(var)
+
+        return mean, std
