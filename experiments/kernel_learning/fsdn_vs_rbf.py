@@ -99,7 +99,7 @@ def main(n_seeds=10):
 
     print(f"F-SDN (Ours):")
     print(f"Mean Error: {mean_sdn*100:.2f} %")
-    print(f"+- {ci_sdn*100:.2f}")
+    print(f"+- {ci_sdn*100:.2f} %")
 
     return df
 

@@ -11,6 +11,7 @@ Authors: Abdullah Karatas, Arsalan Jawaid
 """
 
 import math
+import warnings
 
 import torch
 import torch.nn as nn
@@ -101,6 +102,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         self.log_noise_var = nn.Parameter(torch.tensor(math.log(0.25)))
 
         self.feature_net = self._build_mlp(input_dim, rank, hidden_dims, activation)
+        self.best_loss = None
 
         # Initialize with Xavier (better than std=0.01)
         self._init_weights()
@@ -127,7 +129,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         return nn.Sequential(*layers)
 
     def _init_weights(self):
-        act = self._get_activation_name()
+        act = self.activation
 
         for m in self.modules():
             if isinstance(m, nn.Linear):
@@ -143,9 +145,6 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         last = [m for m in self.feature_net.modules() if isinstance(m, nn.Linear)][-1]
         with torch.no_grad():
             last.weight.mul_(0.05)
-
-    def _get_activation_name(self):
-        return self.activation
 
     def _get_activation(self, activation: str) -> nn.Module:
         """Get activation function."""
@@ -212,7 +211,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         r"""
         Compute feature vector f(\omega).
 
-        If enforce_symmetry=True (default):
+        If enforce_symmetry=True:
             Enforces f(omega) = f(-omega)
 
         Parameters
@@ -235,7 +234,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
             f = self.feature_net(omega)
 
         if torch.isnan(f).any():
-             print("compute_features produced NaNs!")
+            warnings.warn("compute_features produced NaNs!")
 
         return f
 
@@ -564,10 +563,10 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         noise_var = torch.exp(self.log_noise_var).item()
 
         L = self.compute_lowrank_features(X_train)
-        _, rank4r = L.shape
+        _, rank_4r = L.shape
 
         G = L.T @ L
-        M = noise_var * torch.eye(rank4r, device=L.device) + G
+        M = noise_var * torch.eye(rank_4r, device=L.device) + G
         M_chol = torch.linalg.cholesky(M)
 
         Lty = L.T @ y_train
@@ -576,7 +575,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
 
         M_inv_G = torch.cholesky_solve(G, M_chol)
         LtSigmaInvL = (G - G @ M_inv_G) / noise_var
-        Q = torch.eye(rank4r, device=L.device) - LtSigmaInvL
+        Q = torch.eye(rank_4r, device=L.device) - LtSigmaInvL
 
         L_star = self.compute_lowrank_features(X_test)
 

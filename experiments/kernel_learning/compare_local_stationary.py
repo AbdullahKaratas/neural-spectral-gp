@@ -15,11 +15,15 @@ import torch
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
+from pathlib import Path
 
 from nsgp.models.sdn_factorized import FactorizedSpectralDensityNetwork
 from nsgp.models.standard_gp import StandardGP
 
 from nsgp.kernel import LocalStationaryKernel
+
+DATA_DIR = Path(__file__).parent / "data"
+DATA_DIR.mkdir(exist_ok=True)
 
 
 def compare_kernels(
@@ -107,7 +111,7 @@ def compare_kernels(
         'rbf_lower': (mean_gp - 2 * std_gp).detach().numpy(),
         'rbf_upper': (mean_gp + 2 * std_gp).detach().numpy(),
     })
-    posterior_data.to_csv('paper/kernel_learning_posterior.csv', index=False)
+    posterior_data.to_csv(DATA_DIR / 'kernel_learning_posterior.csv', index=False)
 
     # Save training data
     X_train_plot = X_train.squeeze().detach().numpy()
@@ -116,7 +120,7 @@ def compare_kernels(
         'x_train': X_train_plot,
         'y_train': y_train_plot,
     })
-    training_data.to_csv('paper/kernel_learning_training_data.csv', index=False)
+    training_data.to_csv(DATA_DIR / 'kernel_learning_training_data.csv', index=False)
 
     # Plot posterior predictions
     fig1, axes1 = plt.subplots(1, 3, figsize=(18, 5))

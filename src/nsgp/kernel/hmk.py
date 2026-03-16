@@ -1,6 +1,7 @@
 import torch
 import math
 from typing import List
+from ..utils import sq_exp
 
 
 class HarmonizableMixtureKernel:
@@ -38,39 +39,6 @@ class HarmonizableMixtureKernel:
         # B_p matrices
         self.psd_matrices = psd_matrices
 
-    def _sq_exp(self, x1, x2, dist=True):
-        x1_eq_x2 = torch.equal(x1, x2)
-
-        if dist:
-            adjustment = x1.mean(-2, keepdim=True)
-        else:
-            adjustment = 0.0
-        x1 = x1 - adjustment
-
-        # Compute squared distance matrix using quadratic expansion
-        x1_norm = x1.pow(2).sum(dim=-1, keepdim=True)
-        x1_pad = torch.ones_like(x1_norm)
-        if x1_eq_x2 and not x1.requires_grad and not x2.requires_grad:
-            x2, x2_norm, x2_pad = x1, x1_norm, x1_pad
-        else:
-            x2 = (
-                x2 - adjustment
-            )  # x1 and x2 should be identical in all dims except -2 at this point
-            x2_norm = x2.pow(2).sum(dim=-1, keepdim=True)
-            x2_pad = torch.ones_like(x2_norm)
-        if dist:
-            x1_ = torch.cat([-2.0 * x1, x1_norm, x1_pad], dim=-1)
-        else:
-            x1_ = torch.cat([2.0 * x1, x1_norm, x1_pad], dim=-1)
-        x2_ = torch.cat([x2, x2_pad, x2_norm], dim=-1)
-        res = x1_.matmul(x2_.transpose(-2, -1))
-
-        if x1_eq_x2 and not x1.requires_grad and not x2.requires_grad and dist:
-            res.diagonal(dim1=-2, dim2=-1).fill_(0)
-
-        # Zero out negative values
-        return res.clamp_min_(0)
-
     def k_lsg(self, x1, x2):
         """
         Locally stationary Gaussian kernel.
@@ -84,14 +52,14 @@ class HarmonizableMixtureKernel:
         # transform by L1^T/2 so _sq_exp with dist=False gives |bar{x} @ L1^T|^2
         x1_t1 = x1 @ self.L1.T / 2.0
         x2_t1 = x2 @ self.L1.T / 2.0
-        add_mat = self._sq_exp(x1_t1, x2_t1, dist=False)
+        add_mat = sq_exp(x1_t1, x2_t1, dist=False)
         add_mat.mul_(-2 * math.pi**2).exp_()
 
         # For tau^T sigma2 tau:
         # transform by L2^T so _sq_exp with dist=True gives |tau @ L2^T|^2
         x1_t2 = x1 @ self.L2.T
         x2_t2 = x2 @ self.L2.T
-        dist_mat = self._sq_exp(x1_t2, x2_t2, dist=True)
+        dist_mat = sq_exp(x1_t2, x2_t2, dist=True)
         dist_mat.mul_(-2 * math.pi**2).exp_()
 
         return add_mat * dist_mat
@@ -129,7 +97,8 @@ class HarmonizableMixtureKernel:
         if x2.dim() == 1:
             x2 = x2.unsqueeze(-1)
 
-        kernel = 0.0
+        n1, n2 = x1.shape[0], x2.shape[0]
+        kernel = torch.zeros(n1, n2, dtype=torch.complex64, device=x1.device)
 
         for p in range(self.num_components):
             # Shift inputs
@@ -172,12 +141,12 @@ class HarmonizableMixtureKernel:
         # |(omega1 - omega2) @ L1_inv_T|^2
         omega1_t1 = omega1_ @ self.L1_inv_T
         omega2_t1 = omega2_ @ self.L1_inv_T
-        diff_sq = self._sq_exp(omega1_t1, omega2_t1, dist=True)
+        diff_sq = sq_exp(omega1_t1, omega2_t1, dist=True)
 
         # Transform by L2_inv_T/2 so _sq_exp with dist=False gives |mean @ L2_inv_T|^2
         omega1_t2 = omega1_ @ self.L2_inv_T / 2.0
         omega2_t2 = omega2_ @ self.L2_inv_T / 2.0
-        mean_sq = self._sq_exp(omega1_t2, omega2_t2, dist=False)
+        mean_sq = sq_exp(omega1_t2, omega2_t2, dist=False)
 
         result = torch.exp(log_norm - 0.5 * diff_sq - 0.5 * mean_sq)
 
@@ -200,7 +169,7 @@ class HarmonizableMixtureKernel:
 
         # Initialize
         n1, n2 = omega1.shape[0], omega2.shape[0]
-        spectral_sum = torch.zeros(n1, n2, dtype=torch.complex128, device=omega1.device)
+        spectral_sum = torch.zeros(n1, n2, dtype=torch.complex64, device=omega1.device)
 
         # Sum over all pairs
         for i in range(Q_p):
@@ -227,7 +196,7 @@ class HarmonizableMixtureKernel:
 
         n1, n2 = omega1.shape[0], omega2.shape[0]
         spectral_density = torch.zeros(
-            n1, n2, dtype=torch.complex128, device=omega1.device
+            n1, n2, dtype=torch.complex64, device=omega1.device
         )
 
         omega_diff = omega1[:, None, :] - omega2[None, :, :]

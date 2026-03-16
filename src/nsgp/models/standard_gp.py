@@ -12,6 +12,7 @@ Kernels supported:
 Authors: Abdullah Karatas, Arsalan Jawaid
 """
 
+import warnings
 import torch
 import gpytorch
 
@@ -37,11 +38,15 @@ class StandardGP:
     
     def __init__(self):
         self.likelihood = gpytorch.likelihoods.GaussianLikelihood()
+        self.model = None
 
     def compute_covariance(self, X1: torch.Tensor, X2: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
         Compute covariance matrix with optional noise.
         """
+        if self.model is None:
+            warnings.warn("Model is not fitted yet. Returning prior covariance with unoptimized hyperparameters.")
+            self.model = ExactGPModel(None, None, self.likelihood)
         self.model.eval()
         self.likelihood.eval()
 
@@ -50,7 +55,7 @@ class StandardGP:
 
     def fit(self, X_train: torch.Tensor, y_train: torch.Tensor, epochs: int = 100, lr: float = 0.1, patience: int = None, verbose: bool = True):
         """
-        Optimize hyperparameters.
+        Optimize hyperparameters. Assumes zero-mean GP.
         """
 
         self.model = ExactGPModel(X_train, y_train, self.likelihood)
@@ -117,7 +122,9 @@ class StandardGP:
         """
         Posterior prediction using exact GP inference.
         """
-
+        if self.model is None:
+            warnings.warn("Model is not fitted yet. Returning prior predictions with unoptimized hyperparameters.")
+            self.model = ExactGPModel(None, None, self.likelihood)
         self.model.eval()
         self.likelihood.eval()
 

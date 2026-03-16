@@ -1,4 +1,4 @@
-from typing import Union, Optional, Callable
+from typing import Optional, Callable
 import torch
 from warnings import warn
 
@@ -15,14 +15,15 @@ class NonstationaryFeatures:
         self.num_feat = num_feat
 
     def matrix_decomposition(
-        self, matrix, jitter: Union[float] = 1e-8, cholesky_max: Union[int] = 3
+        self, matrix, jitter: float = 1e-8, cholesky_max: int = 3
     ):
         for i in range(cholesky_max):
             try:
                 matrix_root = torch.linalg.cholesky(
                     matrix + i * jitter * torch.eye(matrix.shape[0])
                 )
-                print(f"Jitter added: {i*jitter:.0e}")
+                if i > 0:
+                    warn(f"Jitter added: {i*jitter:.0e}")
                 break
             except Exception:
                 pass
@@ -34,13 +35,14 @@ class NonstationaryFeatures:
 
     def lowrank(
         self,
-        x1: Union[torch.Tensor],
-        spacing: Union[float] = 1.0,
+        x1: torch.Tensor,
+        spacing: float = 1.0,
         return_extras=False,
         **kwargs,
     ):
-        if spacing > 1.0 * torch.pi / ((x1[1, 0] - x1[0, 0]) * x1.shape[-2]):
-            spacing = 1.0 * torch.pi / ((x1[1, 0] - x1[0, 0]) * x1.shape[-2]) - 1e-6
+        x_max = x1.abs().max().item()
+        if spacing > torch.pi / x_max:
+            spacing = torch.pi / x_max - 1e-6
             warn(f"spacing set to {spacing:.2e} to avoid time-periodicity.")
 
         if self.spectral_real:
@@ -77,7 +79,7 @@ class NonstationaryFeatures:
             return kernel_root
 
     def simulation(
-        self, x1: Union[torch.Tensor], spacing: Union[float] = 1.0, n_samples: int = 1, seed=None, **kwargs
+        self, x1: torch.Tensor, spacing: float = 1.0, n_samples: int = 1, seed=None, **kwargs
     ):
         if seed is not None:
             torch.manual_seed(seed)
@@ -87,9 +89,9 @@ class NonstationaryFeatures:
 
     def kernel_estimate(
         self,
-        x1: Union[torch.Tensor],
-        x2: Union[torch.Tensor],
-        spacing: Union[float] = 1.0,
+        x1: torch.Tensor,
+        x2: torch.Tensor,
+        spacing: float = 1.0,
     ):
         x1_eq_x2 = torch.equal(x1, x2)
         kernel_root, matrix_root, omega = self.lowrank(

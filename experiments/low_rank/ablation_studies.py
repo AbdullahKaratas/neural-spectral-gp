@@ -1,10 +1,14 @@
 import torch
 import pandas as pd
+from pathlib import Path
 
 from nsgp.lowrank import NonstationaryFeatures
 from nsgp.kernel import LocalStationaryKernel
 
 import matplotlib.pyplot as plt
+
+DATA_DIR = Path(__file__).parent / "data"
+DATA_DIR.mkdir(exist_ok=True)
 
 
 def relative_error(K_true, K_approx):
@@ -78,12 +82,12 @@ with torch.no_grad():
     for n in n_xdata_grid:
         # Error vs features
         df_n = df_feat[df_feat['n_xdata'] == n][['num_feat', 'error_percent']]
-        feat_path = f'paper/ablation_features_n{n}.csv'
+        feat_path = DATA_DIR / f'ablation_features_n{n}.csv'
         df_n.to_csv(feat_path, index=False)
 
         # Error vs omega
         df_n = df_omega[df_omega['n_xdata'] == n][['omega_max', 'error_percent']]
-        omega_path = f'paper/ablation_omega_n{n}.csv'
+        omega_path = DATA_DIR / f'ablation_omega_n{n}.csv'
         df_n.to_csv(omega_path, index=False)
 
     # Plots

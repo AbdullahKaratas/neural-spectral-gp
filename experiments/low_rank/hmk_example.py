@@ -4,6 +4,7 @@ import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
 import math
+from pathlib import Path
 from nsgp.kernel import HarmonizableMixtureKernel
 from nsgp.lowrank import NonstationaryFeatures
 
@@ -15,6 +16,9 @@ def to_csv(obj, path):
     pd.DataFrame(arr).to_csv(path, index=False, header=False, float_format="%.10e")
     return None
 
+
+DATA_DIR = Path(__file__).parent / "data"
+DATA_DIR.mkdir(exist_ok=True)
 
 # Set up parameters
 d = 1
@@ -94,7 +98,7 @@ file_map = {
 }
 
 for fname, obj in file_map.items():
-    to_csv(obj, "data/" + fname)
+    to_csv(obj, DATA_DIR / fname)
 
 # Save mesh points for spectral density and kernel overlays
 mesh_points_omega = np.column_stack([omega_mesh_x.flatten(), omega_mesh_y.flatten()])

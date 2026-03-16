@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nsgp"
-version = "0.0.1"
+version = "0.1.0"
 
 readme = "README.md"
 requires-python = ">=3.9"
@@ -29,6 +29,8 @@ develop = [
     "pre-commit>=2.8.2",
     "pandas",
     "seaborn",
+    "pytest",
+    "pytest-cov",
 ]
 
 # all dependencies (mandatory and optional)

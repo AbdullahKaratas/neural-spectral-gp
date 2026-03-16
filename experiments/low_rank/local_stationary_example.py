@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+from pathlib import Path
 
 from nsgp.lowrank import NonstationaryFeatures
 from nsgp.kernel import LocalStationaryKernel
@@ -16,6 +17,9 @@ def to_csv(obj, path):
 
     return None
 
+
+DATA_DIR = Path(__file__).parent / "data"
+DATA_DIR.mkdir(exist_ok=True)
 
 lsk = LocalStationaryKernel(a=1.0)
 
@@ -54,7 +58,7 @@ file_map = {
 }
 
 for fname, obj in file_map.items():
-    to_csv(obj, "data/" + fname)
+    to_csv(obj, DATA_DIR / fname)
 
 # Create colormaps
 N = 256
