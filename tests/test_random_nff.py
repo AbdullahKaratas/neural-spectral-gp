@@ -61,5 +61,24 @@ def test_kernel_converges():
     assert rel_err < 0.15
 
 
+def test_cross_kernel(rnff):
+    x1 = torch.linspace(0, 1, 20).unsqueeze(-1)
+    x2 = torch.linspace(1, 2, 15).unsqueeze(-1)
+    rnff.sample_frequencies(seed=0)
+    K12 = rnff.kernel_estimate(x1, x2)
+    assert K12.shape == (20, 15)
+    rnff.sample_frequencies(seed=0)
+    K21 = rnff.kernel_estimate(x2, x1)
+    assert torch.allclose(K12, K21.T, atol=1e-6)
+
+
+def test_seed_reproducibility():
+    rnff = RandomNonstationaryFeatures(spectral_sampler=silverman_sampler, n_feat=50)
+    x = torch.linspace(0, 1, 20).unsqueeze(-1)
+    L1 = rnff.lowrank(x, seed=42)
+    L2 = rnff.lowrank(x, seed=42)
+    assert torch.equal(L1, L2)
+
+
 def test_simulation_shape(rnff, x):
     assert rnff.simulation(x, n_samples=5, seed=0).shape == (5, 50)
