@@ -1,15 +1,3 @@
-"""
-Factorized Spectral Density Network (SDN-F)
-
-This version guarantees positive semi-definiteness by using a low-rank factorization:
-   s(omega, omega') = [f(omega)^T f(omega') + f(-omega)^T f(-omega')]
-
-where f are learned feature functions. This ensures s is positive semi-definite
-by construction and s(omega, omega') = s(omega', omega) = s(-omega, -omega').
-
-Authors: Abdullah Karatas, Arsalan Jawaid
-"""
-
 import math
 import warnings
 
@@ -21,13 +9,7 @@ from typing import Optional, List
 
 class FactorizedSpectralDensityNetwork(nn.Module):
     """
-    SDN with guaranteed positive definiteness through low-rank factorization.
-
-    Architecture:
-        ω → MLP → f(omega) in R^r
-        s(omega, omega') = [f(omega)^T f(omega') + f(-omega)^T f(-omega')]
-
-    This guarantees PSD
+    Factorized Spectral Density Network (SDN-F)
 
     Parameters
     ----------
@@ -161,8 +143,6 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         max_attempts: int = 4
     ) -> torch.Tensor:
         """
-        Compute Cholesky decomposition with adaptive jittering.
-
         Attempts Cholesky decomposition with increasing jitter values.
 
         Parameters
@@ -208,7 +188,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
 
     def compute_features(self, omega: torch.Tensor) -> torch.Tensor:
         r"""
-        Compute feature vector f(\omega).
+        Compute feature vector f(omega).
 
         If enforce_symmetry=True:
             Enforces f(omega) = f(-omega)
@@ -243,10 +223,6 @@ class FactorizedSpectralDensityNetwork(nn.Module):
     ) -> torch.Tensor:
         r"""
         Compute low-rank feature matrix L using nonstationary Fourier features.
-
-        This computes K ~= LL^T
-
-        Grid spacing Δω must satisfy: π/Δω ≥ n·Δx (aliasing)
 
         Parameters
         ----------
@@ -289,6 +265,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         spacings = X_sorted[1:] - X_sorted[:-1]
         delta_x = spacings.min().item()
 
+        # Grid spacing must satisfy aliasing
         spacing = torch.norm(self.omega_grid[1] - self.omega_grid[0]).item()
         constraint_lhs = np.pi / spacing
         constraint_rhs = n_pts * delta_x
@@ -311,11 +288,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         if not self.enforce_symmetry:
             B_sin = torch.sin(phases)  # (n, num_freqs)
 
-        # Correction for zero frequency (Trapezoidal rule boundary)
-        # At ω=0, the weight should be 0.5 * dω (trapezoidal rule for boundary points).
-        # Since K ~ L*L^T, multiplying B by 0.5 results in 0.25 weight for the (0,0) corner term in 2D integration.
-        # This helps the network learn a smooth f(ω) without needing to learn a discontinuity at 0.
-        # Note: We don't apply 0.5 at ω_max because spectral density → 0 there (negligible contribution).
+        # Correction for zero frequency
         omega_norms = torch.norm(self.omega_grid, dim=1)  # (num_freqs,)
         is_zero = omega_norms < 1e-10
         if torch.any(is_zero):
@@ -397,7 +370,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         # Compute W = sigma^2 I_r + L^T L
         W = sigma2 * torch.eye(r, device=L.device, dtype=L.dtype) + (L.T @ L)
 
-        # Compute Cholesky with adaptive jitter
+        # Compute Cholesky
         Lw = self._safe_cholesky(W, jitter=1e-6, max_attempts=4)
 
         # Solve (LL^T + sigma^2 I)^(-1) y using Woodbury formula
@@ -410,12 +383,12 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         data_fit = torch.dot(y, alpha)
 
         # Log determinant using Sylvester's determinant identity:
-        # |LL^T + sigma^2 I| = |sigma^2 I| · |I_r + L^T(sigma^2 I)^{-1}L|
-        #               = (sigma^2)^n · |I_r + (1/sigma^2 )L^TL|
-        #               = (sigma^2)^n · (1/sigma^2)^r · |sigma^2 I_r + L^TL|
-        #               = (sigma^2)^{n-r} · |W|
+        # |LL^T + sigma^2 I| = |sigma^2 I|   |I_r + L^T(sigma^2 I)^{-1}L|
+        #               = (sigma^2)^n   |I_r + (1/sigma^2 )L^TL|
+        #               = (sigma^2)^n   (1/sigma^2)^r   |sigma^2 I_r + L^TL|
+        #               = (sigma^2)^{n-r}  |W|
         # where W = sigma^2I_r + L^TL
-        # Therefore: log|LL^T + sigma^2I| = (n-r)·log(sigma^2) + log|W|
+        # Therefore: log|LL^T + sigma^2I| = (n-r) log(sigma^2) + log|W|
         log_det_sigma = (n - r) * torch.log(torch.as_tensor(sigma2))
         log_det_W = 2 * torch.sum(torch.log(torch.diag(Lw)))  # log|W| = 2·sum(log(diag(Lw)))
         log_det = log_det_sigma + log_det_W
@@ -456,6 +429,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         """
         Train the factorized SDN using low-rank NFF approximation.
 
+        Note:
         Uses log_marginal_likelihood with compute_lowrank_features.
 
         Parameters
