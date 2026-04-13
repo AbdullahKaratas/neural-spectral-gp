@@ -42,7 +42,7 @@ class RandomNonstationaryFeatures:
         # (omega1, omega2) each of shape (m, D)
         self.omega1, self.omega2 = self.spectral_sampler(self.n_feat)
 
-    def compute_features(self, X: torch.Tensor, seed: Optional[int] = None) -> torch.Tensor:
+    def compute_features(self, X: torch.Tensor) -> torch.Tensor:
         """
         Compute the nonstationary Fourier feature map.
 
@@ -113,7 +113,7 @@ class RandomNonstationaryFeatures:
         """
         Phi1 = self.lowrank(X1)
 
-        if X2 is None or torch.equal(X1, X2):
+        if X2 is None or X2 is X1:
             return Phi1 @ Phi1.T
 
         Phi2 = self.lowrank(X2)
