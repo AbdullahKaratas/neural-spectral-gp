@@ -45,6 +45,11 @@ if __name__ == "__main__":
     with torch.no_grad():
         K_true = lsk.kernel(x, x)
 
+    # Symmetrized kernel (irreducible bias floor for random NFF)
+    xx, yy = x, x.T
+    K_sym = 0.5 * torch.exp(-a * (xx**2 + yy**2)) + 0.5 * torch.exp(-a * (xx - yy) ** 2)
+    err_sym = relative_error(K_sym, K_true)
+
     # Regular NFF
     num_feat_nff = 20
     cutoff = 5.0
@@ -99,6 +104,8 @@ if __name__ == "__main__":
     mc_std = [2.0 * r["std_error"]/np.sqrt(n_seeds) for r in results]
 
     ax.errorbar(mc_m, mc_mean, yerr=mc_std, fmt="o-", label="Random NFF")
+    ax.axhline(y=err_sym, color="gray", linestyle=":",
+               label="Symmetrization bias floor")
     ax.axhline(y=err_nff, color="r", linestyle="--",
                label=f"Regular NFF (m={num_feat_nff})")
 
