@@ -111,7 +111,7 @@ if __name__ == "__main__":
     # Plot: kernel heatmaps (true, NFF, Random NFF)
     largest_m = results[-1]["n_features"]
     rnff_largest = RandomNonstationaryFeatures(
-        spectral_sampler=lambda n, a=a: silverman_sampler(n, a=a),
+        spectral_sampler=sampler,
         n_feat=largest_m,
     )
     rnff_largest.sample_frequencies(seed=0)
