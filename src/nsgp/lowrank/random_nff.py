@@ -111,6 +111,8 @@ class RandomNonstationaryFeatures:
         -------
         K : torch.Tensor, shape (n1, n2)
         """
+        # lowrank(X1) may resample frequencies if omega1 is None;
+        # lowrank(X2) reuses the same frequencies (desired).
         Phi1 = self.lowrank(X1)
 
         if X2 is None or X2 is X1:
