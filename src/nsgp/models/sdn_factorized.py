@@ -429,9 +429,6 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         """
         Train the factorized SDN using low-rank NFF approximation.
 
-        Note:
-        Uses log_marginal_likelihood with compute_lowrank_features.
-
         Parameters
         ----------
         X_train : torch.Tensor, shape (n, d)
