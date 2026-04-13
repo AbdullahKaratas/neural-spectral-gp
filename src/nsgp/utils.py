@@ -2,7 +2,7 @@ import torch
 
 
 def sq_exp(x1, x2, dist=True):
-    x1_eq_x2 = x1 is x2
+    x1_eq_x2 = torch.equal(x1, x2)
 
     if dist:
         adjustment = x1.mean(-2, keepdim=True)
