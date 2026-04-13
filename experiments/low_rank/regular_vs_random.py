@@ -65,10 +65,11 @@ if __name__ == "__main__":
 
     results = []
 
+    sampler = lambda n_feat, a=a: silverman_sampler(n_feat, a=a)
+
     for m in mc_features_list:
         errors = []
         for seed in range(n_seeds):
-            sampler = lambda n_feat, a=a: silverman_sampler(n_feat, a=a)
             rnff = RandomNonstationaryFeatures(
                 spectral_sampler=sampler, n_feat=m
             )
