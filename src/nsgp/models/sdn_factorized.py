@@ -39,9 +39,11 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         activation: str = 'relu',
         enforce_symmetry: bool = False,
         learn_log_scale: bool = True,
+        prior_variance: Optional[float] = None,
     ):
         super().__init__()
         self.input_dim = input_dim
+        self.prior_variance = prior_variance
         self.hidden_dims = hidden_dims
         self.rank = rank
         self._n_features_raw = n_features
@@ -185,6 +187,11 @@ class FactorizedSpectralDensityNetwork(nn.Module):
                         "Matrix might not be positive-definite."
                     )
                 current_jitter *= 10
+
+    def log_prior(self) -> torch.Tensor:
+        """Gaussian prior on NN weights: log p(W) = -0.5/prior_variance * ||W||^2."""
+        weights = torch.cat([p.view(-1) for name, p in self.feature_net.named_parameters() if "weight" in name])
+        return -0.5 * weights.norm().pow(2) / self.prior_variance
 
     def compute_features(self, omega: torch.Tensor) -> torch.Tensor:
         r"""
@@ -478,8 +485,10 @@ class FactorizedSpectralDensityNetwork(nn.Module):
             noise_var = torch.exp(self.log_noise_var)
             data_loss = self.log_marginal_likelihood(L, y_train, noise_var)
 
-            # Regularization
+            # MAP (with prior) or MLE (without)
             loss = data_loss
+            if self.prior_variance is not None:
+                loss = loss - self.log_prior()
 
             if torch.isnan(loss):
                 if verbose:
