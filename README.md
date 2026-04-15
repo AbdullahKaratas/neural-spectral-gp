@@ -27,19 +27,21 @@ pip install -e .
 ```
 neural-spectral-gp/
 ├── src/nsgp/
-│   ├── kernel/           # Kernel functions (Silverman, HMK)
+│   ├── kernel/                 # Kernel functions (Silverman, HMK, Neural-GSM)
 │   │   ├── local_stationary.py
-│   │   └── hmk.py
-│   ├── lowrank/          # Fourier feature approximations
-│   │   ├── nff.py        # Regular nonstationary Fourier features
-│   │   └── random_nff.py # Random Fourier Feature baseline
-│   └── models/           # GP models and spectral density networks
-│       ├── sdn_factorized.py
-│       ├── standard_gp.py
-│       └── remes_baseline.py
+│   │   ├── hmk.py
+│   │   └── neural_gsm.py
+│   ├── lowrank/                # Fourier feature approximations
+│   │   ├── regular_nff.py      # Regular Fourier Features (Ours)
+│   │   └── random_nff.py       # Random Fourier Feature
+│   ├── models/                 # GP models
+│   │   ├── sdn_factorized.py   # Factorized Spectral Density Network (Ours)
+│   │   ├── standard_gp.py      # Exact GP Model with RBF
+│   │   └── neural_gsm_gp.py    # Exact GP Model with Neural-GSM
+│   └── utils.py
 ├── experiments/
 │   ├── low_rank/         # Kernel approximation experiments
-│   ├── kernel_learning/  # Spectral density learning experiments
+│   └── kernel_learning/  # Kernel learning experiments
 ├── tests/
 └── pyproject.toml
 ```
