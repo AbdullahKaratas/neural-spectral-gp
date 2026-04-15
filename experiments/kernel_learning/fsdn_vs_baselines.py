@@ -157,11 +157,11 @@ def run_benchmark(kernel_fn, kernel_name: str, n_seeds: int = 5):
 
     if n_seeds > 1:
         for method, col in [("RBF", "error_rbf"), ("Neural-GSM", "error_ngsm"), ("F-SDN (real)", "error_sdnreal"), ("F-SDN (complex)", "error_sdncomplex")]:
-                mean = df[col].mean()
-                std = df[col].std(ddof=1)
-                ci = t_crit * std / np.sqrt(n)
-                print(f"{method}:")
-                print(f"K-error: {mean*100:.2f}% +/- {ci*100:.2f}%")
+            mean = df[col].mean()
+            std = df[col].std(ddof=1)
+            ci = t_crit * std / np.sqrt(n)
+            print(f"{method}:")
+            print(f"K-error: {mean*100:.2f}% +/- {ci*100:.2f}%")
     return df
 
 
