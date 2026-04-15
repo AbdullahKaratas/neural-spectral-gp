@@ -7,7 +7,7 @@ from typing import List, Optional, Tuple
 from ..kernel.neural_gsm import NeuralGSMKernel
 
 
-class NeuralGSMGPModel(gpytorch.models.ExactGP):
+class ExactNeuralGSMGP(gpytorch.models.ExactGP):
     def __init__(self, train_x, train_y, likelihood, kernel):
         super().__init__(train_x, train_y, likelihood)
         self.mean_module = gpytorch.means.ZeroMean()
@@ -60,7 +60,7 @@ class NeuralGSMGP:
     def compute_covariance(self, X1: torch.Tensor, X2: Optional[torch.Tensor] = None) -> torch.Tensor:
         if self.model is None:
             warnings.warn("Model is not fitted yet. Returning prior covariance with random NN weights.")
-            self.model = NeuralGSMGPModel(None, None, self.likelihood, self.kernel)
+            self.model = ExactNeuralGSMGP(None, None, self.likelihood, self.kernel)
         self.model.eval()
         self.likelihood.eval()
 
@@ -85,7 +85,7 @@ class NeuralGSMGP:
         losses : list of float
             Training loss history.
         """
-        self.model = NeuralGSMGPModel(X_train, y_train, self.likelihood, self.kernel)
+        self.model = ExactNeuralGSMGP(X_train, y_train, self.likelihood, self.kernel)
         self.model.train()
         self.likelihood.train()
 
