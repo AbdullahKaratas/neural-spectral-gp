@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
 
-from nsgp.lowrank import NonstationaryFeatures
+from nsgp.lowrank import RegularNonstationaryFeatures
 from nsgp.kernel import LocalStationaryKernel
 
 
@@ -36,7 +36,7 @@ with torch.no_grad():
     omega1 = torch.arange(num_feat).reshape(-1, 1) * delta_omega1
     omega = torch.arange(num_feat_sk).reshape(-1, 1) * delta_omega1 / 10.0
 
-    nff = NonstationaryFeatures(
+    nff = RegularNonstationaryFeatures(
         spectral=lsk.spectral, spectral_real=True, num_feat=num_feat
     )
     kestimate1 = nff.kernel_estimate(x, x, spacing=delta_omega1)

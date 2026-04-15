@@ -6,8 +6,8 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
 
-from nsgp.lowrank import NonstationaryFeatures
-from nsgp.lowrank.random_nff import RandomNonstationaryFeatures
+from nsgp.lowrank import RegularNonstationaryFeatures
+from nsgp.lowrank import RandomNonstationaryFeatures
 from nsgp.kernel import LocalStationaryKernel
 
 
@@ -55,7 +55,7 @@ if __name__ == "__main__":
     cutoff = 5.0
     spacing = cutoff / num_feat_nff
 
-    nff = NonstationaryFeatures(
+    nff = RegularNonstationaryFeatures(
         spectral=lsk.spectral, spectral_real=True, num_feat=num_feat_nff
     )
     with torch.no_grad():

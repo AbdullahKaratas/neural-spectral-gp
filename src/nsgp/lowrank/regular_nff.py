@@ -4,7 +4,7 @@ import torch
 from warnings import warn
 
 
-class NonstationaryFeatures:
+class RegularNonstationaryFeatures:
     def __init__(
         self,
         spectral: Callable[..., torch.Tensor],

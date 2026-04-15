@@ -2,7 +2,7 @@ import torch
 import pandas as pd
 from pathlib import Path
 
-from nsgp.lowrank import NonstationaryFeatures
+from nsgp.lowrank import RegularNonstationaryFeatures
 from nsgp.kernel import LocalStationaryKernel
 
 import matplotlib.pyplot as plt
@@ -34,7 +34,7 @@ with torch.no_grad():
 
         for num_feat in num_feat_grid:
             delta_omega = omega_max / num_feat
-            nff = NonstationaryFeatures(
+            nff = RegularNonstationaryFeatures(
                 spectral=lsk.spectral,
                 spectral_real=True,
                 num_feat=num_feat
@@ -56,7 +56,7 @@ with torch.no_grad():
 
         for omega_max in omega_max_grid:
             delta_omega = omega_max / num_feat
-            nff = NonstationaryFeatures(
+            nff = RegularNonstationaryFeatures(
                 spectral=lsk.spectral,
                 spectral_real=True,
                 num_feat=num_feat
