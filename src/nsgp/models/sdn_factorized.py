@@ -299,6 +299,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
             )
 
         # Compute low rank features
+        # Paper: [F]_{kj} = conj(f_j(omega_k)); no-op when spectral_real=True
         F_pos = self.compute_features(self.omega_grid).conj()   # (num_freqs, r)
         if not self.enforce_symmetry:
             F_neg = self.compute_features(-self.omega_grid)  # (num_freqs, r)
