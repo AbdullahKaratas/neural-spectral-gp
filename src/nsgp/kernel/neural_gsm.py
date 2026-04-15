@@ -171,8 +171,7 @@ class NeuralGSMKernel(Kernel):
             l2_all = self.len_net(x2)
             mu2_all = self.freq_net(x2)
 
-        if not diag:
-            dist_sq = self.covar_dist(x1, x2, square_dist=True, diag=False, **params)
+        dist_sq = self.covar_dist(x1, x2, square_dist=True, diag=diag, **params)
 
         # Accumulate kernel over Q components
         K = None
@@ -187,8 +186,18 @@ class NeuralGSMKernel(Kernel):
 
             if diag:
                 WW = (w1 * w2).squeeze(-1)
-                gibbs = torch.ones_like(WW)
-                cos_term = torch.ones_like(WW)
+                if x1_eq_x2:
+                    gibbs = torch.ones_like(WW)
+                    cos_term = torch.ones_like(WW)
+                else:
+                    S = (l1.pow(2) + l2.pow(2)).squeeze(-1)
+                    prod = (l1 * l2).squeeze(-1)
+                    prefactor = (2.0 * prod / S).sqrt()
+                    gibbs = prefactor * (-dist_sq / S).exp()
+
+                    phase1 = (mu1 * x1).sum(dim=-1)
+                    phase2 = (mu2 * x2).sum(dim=-1)
+                    cos_term = torch.cos(2.0 * math.pi * (phase1 - phase2))
 
             else:
 
