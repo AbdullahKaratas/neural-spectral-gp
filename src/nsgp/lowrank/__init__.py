@@ -3,5 +3,5 @@ from .random_nff import RandomNonstationaryFeatures
 
 __all__ = [
     "RegularNonstationaryFeatures",
-    "RandomNonstationaryFeatures"
-    ]
+    "RandomNonstationaryFeatures",
+]

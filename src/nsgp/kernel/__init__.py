@@ -5,5 +5,5 @@ from .neural_gsm import NeuralGSMKernel
 __all__ = [
     "LocalStationaryKernel",
     "HarmonizableMixtureKernel",
-    "NeuralGSMKernel"
-    ]
+    "NeuralGSMKernel",
+]

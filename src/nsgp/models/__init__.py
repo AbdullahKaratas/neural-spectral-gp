@@ -5,5 +5,5 @@ from .standard_gp import StandardGP
 __all__ = [
     "FactorizedSpectralDensityNetwork",
     "NeuralGSMGP",
-    "StandardGP"
+    "StandardGP",
 ]
