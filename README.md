@@ -50,23 +50,16 @@ neural-spectral-gp/
 
 ## Running experiments
 
-Low-rank kernel approximation (Silverman kernel, HMK):
+Low-rank kernel approximation:
 ```bash
-python experiments/low_rank/local_stationary_example.py
-python experiments/low_rank/hmk_example.py
-```
-
-Regular vs random Fourier features comparison:
-```bash
-python experiments/low_rank/regular_vs_random.py
+python experiments/low_rank/local_stationary_example.py # Silverman
+python experiments/low_rank/hmk_example.py              # HMK
+python experiments/low_rank/ablation_studies.py         # Ablation Studies
+python experiments/low_rank/regular_vs_random.py        # Regular vs Random Fourier
 ```
 
 Kernel learning:
 ```bash
-python experiments/kernel_learning/fsdn_vs_rbf.py
-```
-
-Tests:
-```bash
-pytest tests/
+python experiments/kernel_learning/compare_local_stationary.py # FSDN vs RBF (posterior predictions on Silverman)
+python experiments/kernel_learning/fsdn_vs_rbf.py # FSDN vs RBF (quantitative comparison on Silverman)
 ```
