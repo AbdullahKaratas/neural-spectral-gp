@@ -1,0 +1,32 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using the metadata from this file."
+title: "Neural Spectral Gaussian Processes"
+abstract: "Learning Spectral Densities for Efficient Nonstationary Gaussian Process Simulation. A hybrid framework combining deep learning with spectral methods for efficient simulation of nonstationary Gaussian processes."
+type: software
+authors:
+  - family-names: Karatas
+    given-names: Abdullah
+    # orcid: https://orcid.org/0000-0000-0000-0000  # TODO: add when available
+  - family-names: Jawaid
+    given-names: Arsalan
+    # orcid: https://orcid.org/0000-0000-0000-0000  # TODO: add when available
+repository-code: "https://github.com/mts-public/neural-spectral-gp"
+url: "https://github.com/mts-public/neural-spectral-gp"
+license: MIT
+keywords:
+  - gaussian-processes
+  - spectral-methods
+  - neural-networks
+  - nonstationary
+  - fourier-features
+  - machine-learning
+preferred-citation:
+  type: article
+  title: "Neural Spectral Gaussian Processes: Learning Spectral Densities for Efficient Nonstationary Simulation"
+  authors:
+    - family-names: Karatas
+      given-names: Abdullah
+    - family-names: Jawaid
+      given-names: Arsalan
+  journal: "Advances in Neural Information Processing Systems"
+  year: 2026
