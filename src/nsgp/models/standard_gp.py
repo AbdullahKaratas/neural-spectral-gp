@@ -1,17 +1,3 @@
-"""
-Standard GP Baseline
-
-Implements a standard stationary Gaussian Process using exact inference.
-This serves as a strong baseline to compare against F-SDN.
-
-Kernels supported:
-- RBF (Squared Exponential)
-- Matérn (1/2, 3/2, 5/2)
-- Spectral Mixture (Wilson & Adams, 2013)
-
-Authors: Abdullah Karatas, Arsalan Jawaid
-"""
-
 import warnings
 import torch
 import gpytorch

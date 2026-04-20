@@ -1,44 +1,18 @@
-# Neural Spectral Gaussian Processes
+# Regular Fourier Features for Nonstationary Gaussian Processes
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 
-**Learning Spectral Densities for Efficient Nonstationary Gaussian Process Simulation**
-
-**Authors**: Abdullah Karatas, Arsalan Jawaid
+**Authors**: Abdullah Karatas, Arsalan Jawaid, Joerg Seewig
 
 ---
 
 ## Overview
 
-This repository contains the implementation of **Neural Spectral Gaussian Processes (NSGPs)**, a novel hybrid framework that combines the flexibility of deep learning with the theoretical guarantees of spectral methods for efficient simulation of nonstationary Gaussian processes.
-
-### Key Features
-
-- 🚀 **Fast**: ~1000× faster than standard Cholesky decomposition
-- 🧠 **Flexible**: Learns spectral densities from data using neural networks
-- 📊 **Principled**: Maintains theoretical guarantees through spectral representation
-- 🎯 **General**: Applicable to the full class of harmonizable stochastic processes
-
-### The Problem
-
-Existing methods force a choice:
-- **Regular Nonstationary Fourier Features (NFFs)**: Fast simulation but requires pre-specified kernel
-- **Neural Processes**: Flexible learning but no theoretical guarantees
-
-### Our Solution
-
-We bridge this gap by:
-1. **Learning** the spectral density $s(\omega, \omega')$ using a Spectral Density Network (SDN)
-2. **Simulating** efficiently using Regular NFFs with the learned spectral representation
-
-This hybrid approach achieves both flexibility and speed while maintaining interpretability through the spectral domain.
+We propose regular Fourier features for harmonizable Gaussian processes that discretize the spectral representation on a frequency grid. Existing spectral approaches for nonstationary GPs limit the class of representable kernels. Our method yields a low-rank approximation without modifying the spectral density.
 
 ---
 
 ## Installation
-
-### From source
 
 ```bash
 git clone https://github.com/mts-public/neural-spectral-gp.git
@@ -46,116 +20,40 @@ cd neural-spectral-gp
 pip install -e .
 ```
 
-### Requirements
-
-- Python 3.8+
-- PyTorch 2.0+ or JAX 0.4+
-- NumPy, SciPy, Matplotlib
-
-See `requirements.txt` for complete dependencies.
-
 ---
 
-## Quick Start
-
-```python
-import torch
-from nsgp import SpectralDensityNetwork, NFFs
-
-# Define training data
-X_train = torch.randn(100, 2)  # 100 locations in 2D
-y_train = torch.randn(100)      # Observations
-
-# Initialize and train Spectral Density Network
-sdn = SpectralDensityNetwork(input_dim=2, hidden_dims=[64, 64])
-sdn.fit(X_train, y_train, epochs=1000)
-
-# Simulate at new locations using learned spectral density
-X_new = torch.randn(50, 2)
-samples = sdn.simulate(X_new, n_samples=10, n_features=100)
-```
-
-See `notebooks/01_introduction.ipynb` for detailed tutorials.
-
----
-
-## Method
-
-### Spectral Representation
-
-For a harmonizable stochastic process $Z(x)$, the spectral representation is:
-
-$$Z(x) = \int \exp(i\omega x) \, dW(\omega)$$
-
-where $dW$ is a complex-valued random measure with spectral density $s(\omega, \omega')$.
-
-### Architecture
-
-```
-Input Data {(x_i, y_i)}
-         │
-         ▼
-┌─────────────────────────┐
-│ Spectral Density Network│  ← Learns s(ω,ω') from data
-│   (Neural Network)      │
-└──────────┬──────────────┘
-           │ s_θ(ω,ω')
-           ▼
-┌─────────────────────────┐
-│ Regular NFFs Simulation │  ← Fast sampling O(M·n)
-│ (Fourier Features)      │
-└──────────┬──────────────┘
-           │
-           ▼
-     GP Samples Z(x)
-```
-
-### Key Components
-
-1. **Spectral Density Network (SDN)**
-   - Input: Frequency pairs $(\omega, \omega')$
-   - Output: Spectral density $s(\omega, \omega')$
-   - Constraint: Positive definiteness enforced via Cholesky parametrization
-
-2. **NFFs Simulation**
-   - Uses learned spectral density for efficient sampling
-   - Computational complexity: $O(M \cdot n)$ where $M$ is number of Fourier features
-
----
-
-## Project Structure
+## Project structure
 
 ```
 neural-spectral-gp/
-├── README.md
-├── LICENSE
-├── setup.py
-├── requirements.txt
-│
-├── src/nsgp/              # Core implementation
-│   ├── models/
-│   │   ├── sdn.py         # Spectral Density Network
-│   │   └── nffs.py        # NFFs implementation
-│   ├── kernels/           # Kernel functions
-│   └── utils/             # Utilities and visualization
-│
-├── experiments/           # Reproducible experiments
-│   ├── synthetic/         # Synthetic benchmarks
-│   └── real_data/         # Real-world applications
-│
-├── notebooks/             # Tutorial notebooks
-│   ├── 01_introduction.ipynb
-│   ├── 02_synthetic_experiments.ipynb
-│   └── 03_real_data_analysis.ipynb
-│
-├── tests/                 # Unit tests
-└── docs/                  # Documentation
+├── src/nsgp/
+│   ├── kernel/           # Kernel functions (Silverman, HMK)
+│   │   ├── local_stationary.py
+│   │   └── hmk.py
+│   ├── lowrank/          # Fourier feature approximations
+│   │   ├── nff.py        # Regular nonstationary Fourier features
+│   │   └── random_nff.py # Random Fourier Feature baseline
+│   └── models/           # GP models and spectral density networks
+│       ├── sdn_factorized.py
+│       ├── standard_gp.py
+│       └── remes_baseline.py
+├── experiments/
+│   ├── low_rank/         # Kernel approximation experiments
+│   ├── kernel_learning/  # Spectral density learning experiments
+├── tests/
+└── pyproject.toml
 ```
 
 ---
 
-## Experiments
+## Running experiments
 
+<<<<<<< HEAD
+Low-rank kernel approximation (Silverman kernel, HMK):
+```bash
+python experiments/low_rank/local_stationary_example.py
+python experiments/low_rank/hmk_example.py
+=======
 ### Synthetic Benchmarks
 
 We validate our method on three synthetic scenarios:
@@ -202,12 +100,25 @@ If you use this code in your research, please cite:
   journal={arXiv preprint},
   year={2026}
 }
+>>>>>>> origin/main
 ```
 
----
+Regular vs random Fourier features comparison:
+```bash
+python experiments/low_rank/regular_vs_random.py
+```
 
-## Related Work
+Kernel learning:
+```bash
+python experiments/kernel_learning/fsdn_vs_rbf.py
+```
 
+<<<<<<< HEAD
+Tests:
+```bash
+pytest tests/
+```
+=======
 This work builds upon:
 - **Regular Fourier Features** (Shinozuka, 1972): Efficient simulation for stationary processes
 - **Regular Nonstationary Fourier Features** (Jawaid, 2024): Extension to harmonizable processes
@@ -243,3 +154,4 @@ This work extends the Regular Nonstationary Fourier Features method developed by
 ---
 
 **Status**: 🚧 Work in Progress - Initial implementation phase
+>>>>>>> origin/main
