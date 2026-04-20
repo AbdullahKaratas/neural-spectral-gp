@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import math
 from pathlib import Path
 from nsgp.kernel import HarmonizableMixtureKernel
-from nsgp.lowrank import NonstationaryFeatures
+from nsgp.lowrank import RegularNonstationaryFeatures
 
 
 def to_csv(obj, path):
@@ -73,7 +73,7 @@ required_delta_omega = math.pi / x_max
 print(f"Aliasing satisfied: {delta_omega <= required_delta_omega}")
 
 # NFF approximation
-nff = NonstationaryFeatures(spectral=hmk.s_khm, spectral_real=False, num_feat=num_feat)
+nff = RegularNonstationaryFeatures(spectral=hmk.s_khm, spectral_real=False, num_feat=num_feat)
 k_estimate = nff.kernel_estimate(
     x_range.reshape(-1, 1), x_range.reshape(-1, 1), spacing=delta_omega
 )

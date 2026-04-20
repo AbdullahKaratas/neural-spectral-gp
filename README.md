@@ -27,19 +27,21 @@ pip install -e .
 ```
 neural-spectral-gp/
 ├── src/nsgp/
-│   ├── kernel/           # Kernel functions (Silverman, HMK)
+│   ├── kernel/                 # Kernel functions (Silverman, HMK, Neural-GSM)
 │   │   ├── local_stationary.py
-│   │   └── hmk.py
-│   ├── lowrank/          # Fourier feature approximations
-│   │   ├── nff.py        # Regular nonstationary Fourier features
-│   │   └── random_nff.py # Random Fourier Feature baseline
-│   └── models/           # GP models and spectral density networks
-│       ├── sdn_factorized.py
-│       ├── standard_gp.py
-│       └── remes_baseline.py
+│   │   ├── hmk.py
+│   │   └── neural_gsm.py
+│   ├── lowrank/                # Fourier feature approximations
+│   │   ├── regular_nff.py      # Regular Fourier Features (Ours)
+│   │   └── random_nff.py       # Random Fourier Feature
+│   ├── models/                 # GP models
+│   │   ├── sdn_factorized.py   # Factorized Spectral Density Network (Ours)
+│   │   ├── standard_gp.py      # Exact GP Model with RBF
+│   │   └── neural_gsm_gp.py    # Exact GP Model with Neural-GSM
+│   └── utils.py
 ├── experiments/
 │   ├── low_rank/         # Kernel approximation experiments
-│   ├── kernel_learning/  # Spectral density learning experiments
+│   └── kernel_learning/  # Kernel learning experiments
 ├── tests/
 └── pyproject.toml
 ```
@@ -48,50 +50,30 @@ neural-spectral-gp/
 
 ## Running experiments
 
-<<<<<<< HEAD
-Low-rank kernel approximation (Silverman kernel, HMK):
+Low-rank kernel approximation:
 ```bash
-python experiments/low_rank/local_stationary_example.py
-python experiments/low_rank/hmk_example.py
-=======
-### Synthetic Benchmarks
+python experiments/low_rank/local_stationary_example.py # Silverman
+python experiments/low_rank/hmk_example.py              # HMK
+python experiments/low_rank/ablation_studies.py         # Ablation Studies
+python experiments/low_rank/regular_vs_random.py        # Regular vs Random Fourier
+```
 
-We validate our method on three synthetic scenarios:
+Kernel learning:
+```bash
+python experiments/kernel_learning/compare_local_stationary.py # FSDN vs RBF (posterior predictions on Silverman)
+python experiments/kernel_learning/fsdn_vs_rbf.py              # FSDN vs RBF (quantitative comparison on Silverman)
+```
 
-1. **Locally Stationary (Silverman 1957)**
-   - Ground truth: $r_{LS}(x,x') = \exp(-2a(\frac{x+x'}{2})^2) \exp(-\frac{a}{2}(x-x')^2)$
-
-2. **Spatially Varying Matérn**
-   - Smoothness parameter varies with location
-
-3. **Complex Nonstationary Patterns**
-   - Multiple length scales and amplitudes
-
-### Real Data Applications
-
-- **Climate Data**: Temperature and precipitation modeling
-- **Geospatial Analysis**: Elevation and soil properties
-- **Environmental Monitoring**: Sensor network data
-
----
-
-## Results Preview
-
-| Method | RMSE ↓ | NLL ↓ | Time (s) ↓ |
-|--------|--------|-------|-----------|
-| Standard GP | 0.15 | -1.2 | 125.3 |
-| NFFs (oracle) | 0.16 | -1.1 | 0.12 |
-| NFFs (misspec) | 0.45 | 0.8 | 0.12 |
-| Neural Process | 0.18 | -0.9 | 15.7 |
-| **NSGP (ours)** | **0.17** | **-1.0** | **0.15** |
-
-*Averaged over 10 synthetic datasets with n=1000 observations*
+Tests:
+```bash
+pytest tests/
+```
 
 ---
 
 ## Citation
 
-If you use this code in your research, please cite:
+See [`CITATION.cff`](CITATION.cff) for machine-readable metadata, or use:
 
 ```bibtex
 @article{karatas2026regular,
@@ -100,58 +82,4 @@ If you use this code in your research, please cite:
   journal={arXiv preprint},
   year={2026}
 }
->>>>>>> origin/main
 ```
-
-Regular vs random Fourier features comparison:
-```bash
-python experiments/low_rank/regular_vs_random.py
-```
-
-Kernel learning:
-```bash
-python experiments/kernel_learning/fsdn_vs_rbf.py
-```
-
-<<<<<<< HEAD
-Tests:
-```bash
-pytest tests/
-```
-=======
-This work builds upon:
-- **Regular Fourier Features** (Shinozuka, 1972): Efficient simulation for stationary processes
-- **Regular Nonstationary Fourier Features** (Jawaid, 2024): Extension to harmonizable processes
-- **Neural Processes** (Garnelo et al., 2018): Data-driven GP approximation
-- **Deep Kernel Learning** (Wilson et al., 2016): Learning kernel functions with neural networks
-
----
-
-## Contributing
-
-We welcome contributions! Please see `CONTRIBUTING.md` for guidelines.
-
----
-
-## License
-
-This project is licensed under the MIT License - see the `LICENSE` file for details.
-
----
-
-## Contact
-
-- **Abdullah Karatas** - [GitHub](https://github.com/AbdullahKaratas)
-- **Arsalan Jawaid**
-- **Project Link**: [https://github.com/mts-public/neural-spectral-gp](https://github.com/mts-public/neural-spectral-gp)
-
----
-
-## Acknowledgments
-
-This work extends the Regular Nonstationary Fourier Features method developed by Arsalan Jawaid.
-
----
-
-**Status**: 🚧 Work in Progress - Initial implementation phase
->>>>>>> origin/main
