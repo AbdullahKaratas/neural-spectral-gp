@@ -15,7 +15,7 @@ We propose regular Fourier features for harmonizable Gaussian processes that dis
 ## Installation
 
 ```bash
-git clone https://github.com/AbdullahKaratas/neural-spectral-gp.git
+git clone https://github.com/mts-public/neural-spectral-gp.git
 cd neural-spectral-gp
 pip install -e .
 ```
@@ -61,5 +61,25 @@ python experiments/low_rank/regular_vs_random.py        # Regular vs Random Four
 Kernel learning:
 ```bash
 python experiments/kernel_learning/compare_local_stationary.py # FSDN vs RBF (posterior predictions on Silverman)
-python experiments/kernel_learning/fsdn_vs_rbf.py # FSDN vs RBF (quantitative comparison on Silverman)
+python experiments/kernel_learning/fsdn_vs_rbf.py              # FSDN vs RBF (quantitative comparison on Silverman)
+```
+
+Tests:
+```bash
+pytest tests/
+```
+
+---
+
+## Citation
+
+See [`CITATION.cff`](CITATION.cff) for machine-readable metadata, or use:
+
+```bibtex
+@article{karatas2026regular,
+  title={Regular Fourier Features for Nonstationary Gaussian Processes},
+  author={Karatas, Abdullah and Jawaid, Arsalan and Seewig, Joerg},
+  journal={arXiv preprint},
+  year={2026}
+}
 ```

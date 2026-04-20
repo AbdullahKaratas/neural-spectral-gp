@@ -115,6 +115,8 @@ if __name__ == "__main__":
     ax.set_title("Silverman Kernel: Regular NFF vs Random NFF")
     ax.legend()
 
+    fig.savefig(DATA_DIR / "convergence.png", dpi=150, bbox_inches="tight")
+
     # Plot: kernel heatmaps (true, NFF, Random NFF)
     largest_m = results[-1]["n_features"]
     rnff_largest = RandomNonstationaryFeatures(
@@ -142,4 +144,5 @@ if __name__ == "__main__":
         ax.set_title(title)
 
     plt.tight_layout()
+    fig.savefig(DATA_DIR / "kernel_heatmaps.png", dpi=150, bbox_inches="tight")
     plt.show()
