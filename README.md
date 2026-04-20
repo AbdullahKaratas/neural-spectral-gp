@@ -41,7 +41,7 @@ This hybrid approach achieves both flexibility and speed while maintaining inter
 ### From source
 
 ```bash
-git clone https://github.com/AbdullahKaratas/neural-spectral-gp.git
+git clone https://github.com/mts-public/neural-spectral-gp.git
 cd neural-spectral-gp
 pip install -e .
 ```
@@ -196,11 +196,11 @@ We validate our method on three synthetic scenarios:
 If you use this code in your research, please cite:
 
 ```bibtex
-@article{karatas2025neural,
-  title={Neural Spectral Gaussian Processes: Learning Spectral Densities for Efficient Nonstationary Simulation},
-  author={Karatas, Abdullah and Jawaid, Arsalan},
-  journal={Advances in Neural Information Processing Systems},
-  year={2025}
+@article{karatas2026regular,
+  title={Regular Fourier Features for Nonstationary Gaussian Processes},
+  author={Karatas, Abdullah and Jawaid, Arsalan and Seewig, Joerg},
+  journal={arXiv preprint},
+  year={2026}
 }
 ```
 
@@ -232,7 +232,7 @@ This project is licensed under the MIT License - see the `LICENSE` file for deta
 
 - **Abdullah Karatas** - [GitHub](https://github.com/AbdullahKaratas)
 - **Arsalan Jawaid**
-- **Project Link**: [https://github.com/AbdullahKaratas/neural-spectral-gp](https://github.com/AbdullahKaratas/neural-spectral-gp)
+- **Project Link**: [https://github.com/mts-public/neural-spectral-gp](https://github.com/mts-public/neural-spectral-gp)
 
 ---
 
