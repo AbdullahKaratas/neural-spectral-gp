@@ -9,7 +9,7 @@ from typing import Optional, List
 
 class FactorizedSpectralDensityNetwork(nn.Module):
     """
-    Factorized Spectral Density Network (SDN-F)
+    Factorized Spectral Density Network (F-SDN)
 
     Parameters
     ----------
@@ -27,6 +27,9 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         Activation function ('relu', 'elu', 'tanh'). Default: 'relu'
     enforce_symmetry : bool
         If True, enforce f(omega) = f(-omega). Default: False.
+    spectral_real : bool
+        If True, f(omega) is real-valued. If False, f(omega) is complex-valued.
+        Incompatible with enforce_symmetry=True when False. (default=True)
     """
 
     def __init__(
@@ -38,17 +41,26 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         omega_max: float = 8.0,
         activation: str = 'relu',
         enforce_symmetry: bool = False,
+        spectral_real: bool = True,
         learn_log_scale: bool = True,
+        prior_variance: Optional[float] = None,
     ):
         super().__init__()
         self.input_dim = input_dim
+        self.prior_variance = prior_variance
         self.hidden_dims = hidden_dims
         self.rank = rank
         self._n_features_raw = n_features
         self.omega_max = omega_max
         self.enforce_symmetry = enforce_symmetry
         self.learn_log_scale = learn_log_scale
+        self.spectral_real = spectral_real
         self.activation = activation
+
+        if not spectral_real and enforce_symmetry:
+            raise ValueError(
+                "spectral_real=False is incompatible with enforce_symmetry=True."
+            )
 
         # Frequency grid for low-rank NFF
         if enforce_symmetry:
@@ -83,7 +95,8 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         # Initialize to log(0.5^2) for noise_std = 0.5
         self.log_noise_var = nn.Parameter(torch.tensor(math.log(0.25)))
 
-        self.feature_net = self._build_mlp(input_dim, rank, hidden_dims, activation)
+        output_dim = rank if spectral_real else 2 * rank
+        self.feature_net = self._build_mlp(input_dim, output_dim, hidden_dims, activation)
         self.best_loss = None
 
         # Initialize with Xavier (better than std=0.01)
@@ -186,6 +199,11 @@ class FactorizedSpectralDensityNetwork(nn.Module):
                     )
                 current_jitter *= 10
 
+    def log_prior(self) -> torch.Tensor:
+        """Gaussian prior on NN weights: log p(W) = -0.5/prior_variance * ||W||^2."""
+        weights = torch.cat([p.view(-1) for name, p in self.feature_net.named_parameters() if "weight" in name])
+        return -0.5 * weights.norm().pow(2) / self.prior_variance
+
     def compute_features(self, omega: torch.Tensor) -> torch.Tensor:
         r"""
         Compute feature vector f(omega).
@@ -212,6 +230,10 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         else:
             f = self.feature_net(omega)
 
+        if not self.spectral_real:
+            f_re, f_im = f.chunk(2, dim=-1)
+            f = torch.complex(f_re, f_im)
+
         if torch.isnan(f).any():
             warnings.warn("compute_features produced NaNs!")
 
@@ -231,7 +253,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
 
         Returns
         -------
-        L : torch.Tensor, shape (n, r) or (n, 2r) if use_symmetrized_density=True
+        L : torch.Tensor, shape (n, r) if enforce_symmetry=True, else (n, 4r)
             Low-rank feature matrix where K = LL^T
         """
         # Input validation
@@ -277,7 +299,8 @@ class FactorizedSpectralDensityNetwork(nn.Module):
             )
 
         # Compute low rank features
-        F_pos = self.compute_features(self.omega_grid)   # (num_freqs, r)
+        # Paper: [F]_{kj} = conj(f_j(omega_k)); no-op when spectral_real=True
+        F_pos = self.compute_features(self.omega_grid).conj()   # (num_freqs, r)
         if not self.enforce_symmetry:
             F_neg = self.compute_features(-self.omega_grid)  # (num_freqs, r)
 
@@ -296,16 +319,28 @@ class FactorizedSpectralDensityNetwork(nn.Module):
             if not self.enforce_symmetry:
                 B_sin[:, is_zero] = 0.0
 
-        psi_real = B_cos @ F_pos * spacing
-        if self.enforce_symmetry:
-            L = math.sqrt(2.0) * psi_real
+        if self.spectral_real:
+            psi_real = B_cos @ F_pos * spacing
+            if self.enforce_symmetry:
+                L = math.sqrt(2.0) * psi_real
+            else:
+                psi_imag = B_sin @ F_pos * spacing
+                psi_neg_real = B_cos @ F_neg * spacing
+                psi_neg_imag = B_sin @ F_neg * spacing
+                L = math.sqrt(2.0) * torch.cat(
+                    [psi_real, psi_imag, psi_neg_real, psi_neg_imag], dim=-1
+                )
         else:
-            psi_imag = B_sin @ F_pos * spacing
-            psi_neg_real = B_cos @ F_neg * spacing
-            psi_neg_imag = B_sin @ F_neg * spacing
-            L = math.sqrt(2.0) * torch.cat(
-                [psi_real, psi_imag, psi_neg_real, psi_neg_imag], dim=1
-            )
+            psi_real = torch.cat([
+                B_cos @ F_pos.real - B_sin @ F_pos.imag,
+                B_cos @ F_neg.real - B_sin @ F_neg.imag,
+            ], dim=-1)
+            psi_imag = torch.cat([
+                B_cos @ F_pos.imag + B_sin @ F_pos.real,
+                B_cos @ F_neg.imag + B_sin @ F_neg.real,
+            ], dim=-1)
+            
+            L = math.sqrt(2.0) * torch.cat([psi_real, psi_imag], dim=-1) * spacing
 
         # Apply learnable scale: L_scaled = sqrt(theta) * L
         L *= torch.exp(0.5 * self.log_scale)
@@ -478,8 +513,10 @@ class FactorizedSpectralDensityNetwork(nn.Module):
             noise_var = torch.exp(self.log_noise_var)
             data_loss = self.log_marginal_likelihood(L, y_train, noise_var)
 
-            # Regularization
+            # MAP (with prior) or MLE (without)
             loss = data_loss
+            if self.prior_variance is not None:
+                loss = loss - self.log_prior()
 
             if torch.isnan(loss):
                 if verbose:

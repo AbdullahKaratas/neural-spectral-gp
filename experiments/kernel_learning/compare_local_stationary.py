@@ -17,8 +17,8 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from pathlib import Path
 
-from nsgp.models.sdn_factorized import FactorizedSpectralDensityNetwork
-from nsgp.models.standard_gp import StandardGP
+from nsgp.models import FactorizedSpectralDensityNetwork
+from nsgp.models import StandardGP
 
 from nsgp.kernel import LocalStationaryKernel
 
