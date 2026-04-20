@@ -1,0 +1,40 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using the metadata from this file."
+title: "neural-spectral-gp"
+abstract: "Reference implementation of Neural Spectral Gaussian Processes: a hybrid framework combining neural networks with Regular Nonstationary Fourier Features for efficient simulation of nonstationary Gaussian processes."
+type: software
+authors:
+  - family-names: Karatas
+    given-names: Abdullah
+    orcid: https://orcid.org/0009-0000-2463-6351
+  - family-names: Jawaid
+    given-names: Arsalan
+    orcid: https://orcid.org/0000-0001-9951-4164
+  - family-names: Seewig
+    given-names: Joerg
+    orcid: https://orcid.org/0000-0002-1420-1597
+repository-code: "https://github.com/mts-public/neural-spectral-gp"
+url: "https://github.com/mts-public/neural-spectral-gp"
+license: MIT
+keywords:
+  - gaussian-processes
+  - spectral-methods
+  - neural-networks
+  - nonstationary
+  - fourier-features
+  - machine-learning
+preferred-citation:
+  type: article
+  title: "Regular Fourier Features for Nonstationary Gaussian Processes"
+  authors:
+    - family-names: Karatas
+      given-names: Abdullah
+      orcid: https://orcid.org/0009-0000-2463-6351
+    - family-names: Jawaid
+      given-names: Arsalan
+      orcid: https://orcid.org/0000-0001-9951-4164
+    - family-names: Seewig
+      given-names: Joerg
+      orcid: https://orcid.org/0000-0002-1420-1597
+  journal: "arXiv"
+  year: 2026
