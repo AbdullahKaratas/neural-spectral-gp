@@ -31,16 +31,33 @@ class RandomNonstationaryFeatures:
         """
         Draw frequency pairs from the spectral density.
 
+        Seeding uses a local ``torch.Generator`` and is forwarded to
+        ``spectral_sampler`` as a ``generator=`` kwarg if supported, so the
+        global RNG is not mutated. Samplers that don't accept ``generator``
+        fall back to a ``torch.manual_seed`` context that is restored after
+        sampling.
+
         Parameters
         ----------
         seed : int, optional
             Random seed for reproducibility.
         """
-        if seed is not None:
-            torch.manual_seed(seed)
+        if seed is None:
+            self.omega1, self.omega2 = self.spectral_sampler(self.n_feat)
+            return
 
-        # (omega1, omega2) each of shape (m, D)
-        self.omega1, self.omega2 = self.spectral_sampler(self.n_feat)
+        gen = torch.Generator().manual_seed(seed)
+        try:
+            self.omega1, self.omega2 = self.spectral_sampler(
+                self.n_feat, generator=gen
+            )
+        except TypeError:
+            prev_state = torch.random.get_rng_state()
+            try:
+                torch.manual_seed(seed)
+                self.omega1, self.omega2 = self.spectral_sampler(self.n_feat)
+            finally:
+                torch.random.set_rng_state(prev_state)
 
     def compute_features(self, X: torch.Tensor) -> torch.Tensor:
         """
@@ -101,6 +118,12 @@ class RandomNonstationaryFeatures:
     ) -> torch.Tensor:
         """
         Compute K_hat = (1/4m) * Phi(X1) @ Phi(X2)^T.
+
+        The ``X2 is X1`` check is an identity check (not ``torch.equal``)
+        because it only exists to skip a redundant feature computation for
+        the symmetric case. Two independently constructed tensors with the
+        same values fall through to the cross-kernel path, which gives the
+        same numerical result.
 
         Parameters
         ----------
