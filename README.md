@@ -196,10 +196,10 @@ We validate our method on three synthetic scenarios:
 If you use this code in your research, please cite:
 
 ```bibtex
-@article{karatas2026neural,
-  title={Neural Spectral Gaussian Processes: Learning Spectral Densities for Efficient Nonstationary Simulation},
-  author={Karatas, Abdullah and Jawaid, Arsalan},
-  journal={Advances in Neural Information Processing Systems},
+@article{karatas2026regular,
+  title={Regular Fourier Features for Nonstationary Gaussian Processes},
+  author={Karatas, Abdullah and Jawaid, Arsalan and Seewig, Joerg},
+  journal={arXiv preprint},
   year={2026}
 }
 ```
