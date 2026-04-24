@@ -53,10 +53,12 @@ class DKLGP:
             hidden_dims=hidden_dims
         )
         self.model = None
+        self.best_loss = None
 
     def compute_covariance(self, X1: torch.Tensor, X2: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
-        Compute covariance matrix with optional noise.
+        Compute the DKL covariance matrix k(x, x') = k_RBF(s(phi(x)), s(phi(x'))),
+        where phi is the feature extractor and s is `ScaleToBounds`.
         """
         if self.model is None:
             raise RuntimeError("Model not fitted yet.")
@@ -64,7 +66,13 @@ class DKLGP:
         self.likelihood.eval()
 
         with torch.no_grad():
-            return self.model.covar_module(X1, X2).to_dense()
+            phi1 = self.model.scale_to_bounds(self.model.feature_extractor(X1))
+            if X2 is None:
+                phi2 = phi1
+            else:
+                phi2 = self.model.scale_to_bounds(self.model.feature_extractor(X2))
+            return self.model.covar_module(phi1, phi2).to_dense()
+
 
     def fit(self, X_train: torch.Tensor, y_train: torch.Tensor, epochs: int = 100, lr: float = 0.1, patience: int = None, verbose: bool = True):
         """
@@ -97,7 +105,6 @@ class DKLGP:
         for epoch in range(epochs):
             optimizer.zero_grad()
             output = self.model(X_train)
-            # MLL includes the Gaussian prior via AddedLossTerm automatically
             loss = -mll(output, y_train)
 
             if torch.isnan(loss):
