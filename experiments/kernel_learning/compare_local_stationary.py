@@ -80,7 +80,7 @@ def compare_kernels(
     results['F-SDN'] = K_sdn
 
     # Predictions
-    mean_sdn, std_sdn = sdn.predict(X_test, X_train, y_train, predictive_dist=True)
+    mean_sdn, std_sdn = sdn.predict(X_test, predictive_dist=True)
     mean_gp, std_gp = gp.predict(X_test, predictive_dist=True)
 
     # True posterior

@@ -1,4 +1,3 @@
-import warnings
 import torch
 import gpytorch
 
@@ -31,8 +30,7 @@ class StandardGP:
         Compute covariance matrix with optional noise.
         """
         if self.model is None:
-            warnings.warn("Model is not fitted yet. Returning prior covariance with unoptimized hyperparameters.")
-            self.model = ExactGPModel(None, None, self.likelihood)
+            raise RuntimeError("Model not fitted yet.")
         self.model.eval()
         self.likelihood.eval()
 
@@ -104,22 +102,39 @@ class StandardGP:
 
         return losses
 
-    def predict(self, X_test: torch.Tensor, predictive_dist=True) -> Tuple[torch.Tensor, torch.Tensor]:
+    def _full_pred_dist(
+        self, X_test: torch.Tensor, predictive_dist: bool = True
+    ) -> gpytorch.distributions.MultivariateNormal:
         """
-        Posterior prediction using exact GP inference.
+        Return the full joint predictive distribution.
+
+        Parameters
+        ----------
+        X_test : torch.Tensor, shape (t, d)
+            Test locations.
+        predictive_dist : bool
+            If True, include observation noise.
+
+        Returns
+        -------
+        gpytorch.distributions.MultivariateNormal
         """
         if self.model is None:
-            warnings.warn("Model is not fitted yet. Returning prior predictions with unoptimized hyperparameters.")
-            self.model = ExactGPModel(None, None, self.likelihood)
+            raise RuntimeError("Model not fitted yet.")
         self.model.eval()
         self.likelihood.eval()
 
         with torch.no_grad():
             if predictive_dist:
-                pred = self.likelihood(self.model(X_test))
+                return self.likelihood(self.model(X_test))
             else:
-                pred = self.model(X_test)
-        
-        mean = pred.mean 
+                return self.model(X_test)
+
+    def predict(self, X_test: torch.Tensor, predictive_dist=True) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Posterior prediction using exact GP inference.
+        """
+        pred = self._full_pred_dist(X_test, predictive_dist=predictive_dist)
+        mean = pred.mean
         var = pred.variance
         return mean, torch.sqrt(var)
