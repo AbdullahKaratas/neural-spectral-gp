@@ -1,5 +1,3 @@
-import warnings
-
 import torch
 import gpytorch
 from typing import List, Optional, Tuple
@@ -59,8 +57,7 @@ class NeuralGSMGP:
 
     def compute_covariance(self, X1: torch.Tensor, X2: Optional[torch.Tensor] = None) -> torch.Tensor:
         if self.model is None:
-            warnings.warn("Model is not fitted yet. Returning prior covariance with random NN weights.")
-            self.model = ExactNeuralGSMGP(None, None, self.likelihood, self.kernel)
+            raise RuntimeError("Model not fitted yet.")
         self.model.eval()
         self.likelihood.eval()
 

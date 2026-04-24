@@ -30,8 +30,7 @@ class StandardGP:
         Compute covariance matrix with optional noise.
         """
         if self.model is None:
-            warnings.warn("Model is not fitted yet. Returning prior covariance with unoptimized hyperparameters.")
-            self.model = ExactGPModel(None, None, self.likelihood)
+            raise RuntimeError("Model not fitted yet.")
         self.model.eval()
         self.likelihood.eval()
 
