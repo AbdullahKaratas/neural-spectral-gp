@@ -503,7 +503,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         losses = []
 
         if verbose:
-            print("TRAINING FACTORIZED SDN (PD Guaranteed):")
+            print("TRAINING:")
             print(f"  Parameters: {sum(p.numel() for p in self.parameters()):,}")
             print(f"  Rank: {self.rank}")
             print(f"  Epochs: {epochs}")
@@ -591,31 +591,33 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         """
         if self.X_train is None:
             raise RuntimeError("Model not fitted yet.")
+        
+        with torch.no_grad():
 
-        noise_var = torch.exp(self.log_noise_var).item()
+            noise_var = torch.exp(self.log_noise_var).item()
 
-        L = self.compute_lowrank_features(self.X_train)
-        _, rank_4r = L.shape
+            L = self.compute_lowrank_features(self.X_train)
+            _, rank_4r = L.shape
 
-        G = L.T @ L
-        M = noise_var * torch.eye(rank_4r, device=L.device) + G
-        M_chol = torch.linalg.cholesky(M)
+            G = L.T @ L
+            M = noise_var * torch.eye(rank_4r, device=L.device) + G
+            M_chol = torch.linalg.cholesky(M)
 
-        Lty = L.T @ self.y_train
-        M_inv_Lty = torch.cholesky_solve(Lty.unsqueeze(-1), M_chol).squeeze(-1)
-        beta = (Lty - G @ M_inv_Lty) / noise_var
+            Lty = L.T @ self.y_train
+            M_inv_Lty = torch.cholesky_solve(Lty.unsqueeze(-1), M_chol).squeeze(-1)
+            beta = (Lty - G @ M_inv_Lty) / noise_var
 
-        M_inv_G = torch.cholesky_solve(G, M_chol)
-        LtSigmaInvL = (G - G @ M_inv_G) / noise_var
-        Q = torch.eye(rank_4r, device=L.device) - LtSigmaInvL
+            M_inv_G = torch.cholesky_solve(G, M_chol)
+            LtSigmaInvL = (G - G @ M_inv_G) / noise_var
+            Q = torch.eye(rank_4r, device=L.device) - LtSigmaInvL
 
-        L_star = self.compute_lowrank_features(X_test)
+            L_star = self.compute_lowrank_features(X_test)
 
-        # Posterior mean and variance
-        mean = L_star @ beta
-        covar = L_star @ Q @ L_star.T
-        if predictive_dist:
-            covar = covar + noise_var * torch.eye(L_star.shape[0], device=L_star.device)
+            # Posterior mean and variance
+            mean = L_star @ beta
+            covar = L_star @ Q @ L_star.T
+            if predictive_dist:
+                covar = covar + noise_var * torch.eye(L_star.shape[0], device=L_star.device)
 
         return gpytorch.distributions.MultivariateNormal(mean, covar)
 
