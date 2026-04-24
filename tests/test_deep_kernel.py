@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from src.nsgp.kernel.deep_kernel import FeatureExtractor
+from nsgp.kernel.deep_kernel import FeatureExtractor
 
 
 class TestFeatureExtractor:

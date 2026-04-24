@@ -9,14 +9,12 @@ class FeatureExtractor(nn.Module):
     """
     MLP feature map phi: R^D -> R^F used as the neural part of a DKL GP.
 
-    Architecture: Linear -> SELU -> ... -> Linear (no activation on output).
-    Xavier uniform init + zero bias to match the style of `neural_gsm.py`.
+    Fully connected network with RELU, as described in the original DKL paper.
 
-    Intended usage follows the GPyTorch reference implementation of Deep
-    Kernel Learning (Wilson et al. 2016): apply `phi` inside a GP model's
+    Intended usage follows the GPyTorch reference implementation of the DKL
+    paper: apply `phi` inside a GP model's
     `forward` and feed the result into a stationary base kernel such as
-    `ScaleKernel(RBFKernel(ard_num_dims=F))`. No dedicated kernel wrapper
-    is needed.
+    `ScaleKernel(RBFKernel(ard_num_dims=F))`.
 
     Parameters
     ----------
@@ -43,7 +41,7 @@ class FeatureExtractor(nn.Module):
         prev = input_dim
         for h in self.hidden_dims:
             layers.append(nn.Linear(prev, h))
-            layers.append(nn.SELU())
+            layers.append(nn.ReLU())
             prev = h
         layers.append(nn.Linear(prev, output_dim))
         self.net = nn.Sequential(*layers)
@@ -53,8 +51,7 @@ class FeatureExtractor(nn.Module):
     def _init_weights(self) -> None:
         for m in self.net.modules():
             if isinstance(m, nn.Linear):
-                limit = np.sqrt(6.0 / (m.in_features + m.out_features))
-                nn.init.uniform_(m.weight, -limit, limit)
+                nn.init.kaiming_normal_(m.weight, mode='fan_in', nonlinearity='relu')
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
 
