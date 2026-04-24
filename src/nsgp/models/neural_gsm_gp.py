@@ -152,11 +152,25 @@ class NeuralGSMGP:
 
         return losses
 
-    def predict(
+    def _full_pred_dist(
         self,
         X_test: torch.Tensor,
         predictive_dist: bool = True,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> gpytorch.distributions.MultivariateNormal:
+        """
+        Return the full joint predictive distribution.
+
+        Parameters
+        ----------
+        X_test : torch.Tensor, shape (t, d)
+            Test locations.
+        predictive_dist : bool
+            If True, include observation noise.
+
+        Returns
+        -------
+        gpytorch.distributions.MultivariateNormal
+        """
         if self.model is None:
             raise RuntimeError("Model not fitted yet.")
         self.model.eval()
@@ -164,7 +178,14 @@ class NeuralGSMGP:
 
         with torch.no_grad():
             if predictive_dist:
-                pred = self.likelihood(self.model(X_test))
+                return self.likelihood(self.model(X_test))
             else:
-                pred = self.model(X_test)
+                return self.model(X_test)
+
+    def predict(
+        self,
+        X_test: torch.Tensor,
+        predictive_dist: bool = True,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        pred = self._full_pred_dist(X_test, predictive_dist=predictive_dist)
         return pred.mean, torch.sqrt(pred.variance)
