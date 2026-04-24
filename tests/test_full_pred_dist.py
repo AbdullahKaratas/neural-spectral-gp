@@ -5,6 +5,7 @@ import gpytorch
 from nsgp.models.standard_gp import StandardGP
 from nsgp.models.neural_gsm_gp import NeuralGSMGP
 from nsgp.models.sdn_factorized import FactorizedSpectralDensityNetwork
+from nsgp.models.dkl_gp import DKLGP
 
 
 @pytest.fixture
@@ -43,6 +44,14 @@ def fitted_fsdn(data):
     return model
 
 
+@pytest.fixture
+def fitted_dkl(data):
+    X_train, y_train, _, _ = data
+    model = DKLGP(input_dim=1, output_dim=2, hidden_dims=[8, 8])
+    model.fit(X_train, y_train, epochs=5, verbose=False)
+    return model
+
+
 def assert_valid_nlpd(model, X_test, y_test):
     dist = model._full_pred_dist(X_test)
     nlpd = gpytorch.metrics.negative_log_predictive_density(dist, y_test)
@@ -63,3 +72,7 @@ class TestNLPD:
     def test_fsdn_nlpd(self, fitted_fsdn, data):
         _, _, X_test, y_test = data
         assert_valid_nlpd(fitted_fsdn, X_test, y_test)
+
+    def test_dkl_nlpd(self, fitted_dkl, data):
+        _, _, X_test, y_test = data
+        assert_valid_nlpd(fitted_dkl, X_test, y_test)
