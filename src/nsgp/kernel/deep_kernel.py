@@ -1,17 +1,22 @@
-from typing import List, Optional
+from typing import List
 
 import numpy as np
 import torch
 import torch.nn as nn
-from gpytorch.kernels import Kernel, RBFKernel, ScaleKernel
 
 
 class FeatureExtractor(nn.Module):
     """
-    MLP feature map phi: R^D -> R^F used as the neural part of the DKL kernel.
+    MLP feature map phi: R^D -> R^F used as the neural part of a DKL GP.
 
     Architecture: Linear -> SELU -> ... -> Linear (no activation on output).
     Xavier uniform init + zero bias to match the style of `neural_gsm.py`.
+
+    Intended usage follows the GPyTorch reference implementation of Deep
+    Kernel Learning (Wilson et al. 2016): apply `phi` inside a GP model's
+    `forward` and feed the result into a stationary base kernel such as
+    `ScaleKernel(RBFKernel(ard_num_dims=F))`. No dedicated kernel wrapper
+    is needed.
 
     Parameters
     ----------
@@ -64,83 +69,3 @@ class FeatureExtractor(nn.Module):
         phi : (... x N x F)
         """
         return self.net(x)
-
-
-class DeepKernel(Kernel):
-    """
-    Deep Kernel Learning (Wilson et al. 2016): k(x, x') = k_base(phi(x), phi(x')).
-
-    Stationary in feature space, non-stationary in input space through phi.
-    phi is a `FeatureExtractor` MLP; the base kernel defaults to a scaled RBF.
-
-    Parameters
-    ----------
-    input_dim : int
-        Dimensionality of the input space D.
-    feature_dim : int
-        Dimensionality of the feature space F.
-    hidden_dims : list of int
-        Hidden layer sizes for the feature extractor.
-    base_kernel : Kernel, optional
-        Stationary base kernel on the feature space. Defaults to
-        `ScaleKernel(RBFKernel(ard_num_dims=feature_dim))`.
-
-    Notes
-    -----
-    `has_lengthscale = False` on purpose: the lengthscale lives inside
-    the base kernel, not on this wrapper.
-    """
-
-    is_stationary = False
-    has_lengthscale = False
-
-    def __init__(
-        self,
-        input_dim: int,
-        feature_dim: int = 2,
-        hidden_dims: List[int] = [32, 32],
-        base_kernel: Optional[Kernel] = None,
-        **kwargs,
-    ):
-        super().__init__(**kwargs)
-        self.input_dim = input_dim
-        self.feature_dim = feature_dim
-
-        self.feature_extractor = FeatureExtractor(
-            input_dim=input_dim,
-            output_dim=feature_dim,
-            hidden_dims=hidden_dims,
-        )
-
-        if base_kernel is None:
-            base_kernel = ScaleKernel(RBFKernel(ard_num_dims=feature_dim))
-        self.base_kernel = base_kernel
-
-    def forward(
-        self,
-        x1: torch.Tensor,
-        x2: torch.Tensor,
-        diag: bool = False,
-        **params,
-    ) -> torch.Tensor:
-        """
-        Compute the DKL kernel matrix.
-
-        Parameters
-        ----------
-        x1 : (... x N x D)
-        x2 : (... x M x D)
-        diag : bool
-            If True, return only diagonal elements.
-
-        Returns
-        -------
-        K : (... x N x M) or (... x N,) if diag
-        """
-        phi1 = self.feature_extractor(x1)
-        if torch.equal(x1, x2):
-            phi2 = phi1
-        else:
-            phi2 = self.feature_extractor(x2)
-
-        return self.base_kernel.forward(phi1, phi2, diag=diag, **params)
