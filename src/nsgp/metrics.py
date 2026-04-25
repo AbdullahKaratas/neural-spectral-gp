@@ -1,28 +1,6 @@
 """
-Posterior-quality metrics for the kernel-learning baseline comparison.
-
-Four metrics, addressing R1 + R3 of the UAI rebuttal:
-
-- ``negative_log_predictive_density(pred_dist, y_test)``
-    Standard NLPD via GPyTorch. Average negative log predictive density per
-    test point under the fitted posterior, evaluated on noisy observations.
-
-- ``kl_posterior(mvn_fit, mvn_oracle)``
-    KL(q || p) between the fitted posterior and the oracle Bayes posterior
-    obtained by running standard GP regression with the *true* kernel and
-    known noise variance. Variant (a): "how close is my Bayes inference to
-    ideal Bayes inference."
-
-- ``log_pred_density_true_function(mvn_fit, f_true_test)``
-    Log predictive density of the noiseless true function values under the
-    fitted posterior. R1 explicitly asks for this. Variant (b).
-
-- ``oracle_posterior(kernel_fn, X_train, y_train, X_test, noise_var)``
-    The "true" posterior used for the KL above: GP regression with the
-    ground-truth kernel and noise variance.
-
-Per-model adapters for marginal likelihood and noise variance live alongside
-because the API differs between the GPyTorch-backed models and F-SDN.
+Custom metrics / values for the kernel-learning baseline
+comparison. Some metrics not covered by `gpytorch.metrics`.
 """
 from typing import Callable
 
@@ -33,14 +11,6 @@ from .models.standard_gp import StandardGP
 from .models.neural_gsm_gp import NeuralGSMGP
 from .models.dkl_gp import DKLGP
 from .models.sdn_factorized import FactorizedSpectralDensityNetwork
-
-
-def negative_log_predictive_density(
-    pred_dist: gpytorch.distributions.MultivariateNormal,
-    y_test: torch.Tensor,
-) -> torch.Tensor:
-    """Average NLPD per test point under the predictive distribution."""
-    return gpytorch.metrics.negative_log_predictive_density(pred_dist, y_test)
 
 
 def kl_posterior(
@@ -57,19 +27,6 @@ def kl_posterior(
     return torch.distributions.kl.kl_divergence(mvn_fit, mvn_oracle)
 
 
-def log_pred_density_true_function(
-    mvn_fit: gpytorch.distributions.MultivariateNormal,
-    f_true_test: torch.Tensor,
-) -> torch.Tensor:
-    """
-    Log predictive density of the noiseless ground-truth function values
-    under the fitted posterior. Returns total log density (not per-point).
-
-    R1 explicitly asks for this.
-    """
-    return mvn_fit.log_prob(f_true_test)
-
-
 def oracle_posterior(
     kernel_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
     X_train: torch.Tensor,
@@ -78,11 +35,8 @@ def oracle_posterior(
     noise_var: float,
 ) -> gpytorch.distributions.MultivariateNormal:
     """
-    Bayes-optimal GP posterior under the ground-truth kernel.
-
-    Returns a MultivariateNormal over the noiseless function values at
-    X_test, i.e. the predictive distribution **without** observation noise
-    — this is the natural target for KL against a fitted posterior on f.
+    True GP predictive distribution under the ground-truth kernel.
+    Returns a MultivariateNormal at X_test.
     """
     K_train = kernel_fn(X_train, X_train)
     K_cross = kernel_fn(X_test, X_train)
@@ -97,44 +51,17 @@ def oracle_posterior(
     V = torch.cholesky_solve(K_cross.transpose(-1, -2), L)
     cov = K_test - K_cross @ V
 
-    # Symmetrise + jitter for numerical stability before MVN construction.
-    cov = 0.5 * (cov + cov.transpose(-1, -2))
-    jitter = 1e-6 * torch.eye(cov.shape[0], dtype=cov.dtype, device=cov.device)
-    return gpytorch.distributions.MultivariateNormal(mean, cov + jitter)
+    # Add observation noise for predictive distribution
+    n_test = X_test.shape[0]
+    cov = cov + noise_var * torch.eye(n_test, dtype=cov.dtype, device=cov.device)
+    return gpytorch.distributions.MultivariateNormal(mean, cov)
 
 
-def _set_eval_mode(model) -> None:
-    """Put both the GP and the likelihood into eval mode for inference."""
-    model.model.eval()
-    model.likelihood.eval()
-
-
-def marginal_log_likelihood(model, X_train: torch.Tensor, y_train: torch.Tensor) -> float:
-    """
-    Marginal log-likelihood of the training data under the fitted model.
-
-    Per-model implementation:
-    - StandardGP / NeuralGSMGP / DKLGP use GPyTorch's ExactMarginalLogLikelihood.
-    - FactorizedSpectralDensityNetwork has its own low-rank MLL routine,
-      which returns a *negative* MLL (training loss); we negate it here.
-    """
-    if isinstance(model, (StandardGP, NeuralGSMGP, DKLGP)):
-        if model.model is None:
-            raise RuntimeError("Model not fitted yet.")
-        _set_eval_mode(model)
-        mll = gpytorch.mlls.ExactMarginalLogLikelihood(model.likelihood, model.model)
-        with torch.no_grad():
-            output = model.model(X_train)
-            return float(mll(output, y_train).item())
-
-    if isinstance(model, FactorizedSpectralDensityNetwork):
-        with torch.no_grad():
-            L = model.compute_lowrank_features(X_train)
-            sigma2 = torch.exp(model.log_noise_var)
-            nll = model.log_marginal_likelihood(L, y_train, sigma2)
-            return float(-nll.item())
-
-    raise TypeError(f"Unsupported model type: {type(model).__name__}")
+def marginal_log_likelihood(model) -> float:
+    """Best marginal log-likelihood seen during training (negated training loss)."""
+    if model.best_loss is None:
+        raise RuntimeError("Model not fitted yet.")
+    return -model.best_loss
 
 
 def noise_variance(model) -> float:
