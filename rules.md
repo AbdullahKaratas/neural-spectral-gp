@@ -64,6 +64,25 @@ Vor dem ersten Commit zu einem Issue kurz klären:
 
 Diese vier Fragen kurz im Issue-Kommentar beantworten, bevor wir anfangen.
 
+## 6a. Keine Abkürzungen bei numerischen Fehlern
+
+- **Numerische Crashes (Cholesky, NaN/Inf, ill-conditioned) werden an
+  der Wurzel gefixt, nicht weggewrappt.** Try/except um einen
+  fehlschlagenden Fit ist ein Recovery-Mechanismus für einen Run, kein
+  legitimer Dauerzustand.
+- **Why:** Stille Failures verschieben das Problem nur — wenn F-SDN auf
+  bestimmten Seeds nicht konvergiert, ist das ein methodisches
+  Limitation-Statement, das wir entweder beheben oder offen
+  dokumentieren müssen. R3 fragt explizit nach Jitter-Verhalten in der
+  Praxis; wir können dazu keine ehrliche Antwort geben, wenn wir die
+  Crashes wegwerfen.
+- **How to apply:** Wenn ein Modell crasht, suchen wir die Ursache
+  (Conditioning, Rank, Hyperparameter). Erst wenn die Ursache
+  verstanden ist, entscheiden wir bewusst: Bug fixen, Hyperparameter
+  einschränken, oder als bekannte Limitation dokumentieren. Recovery-
+  Wrapper sind nur für laufende Benchmark-Sessions OK, nie für
+  Production-Code.
+
 ## 6. Qualität bei KI-Generierung
 
 - **Kein ungeprüfter KI-Code in einen PR.** Jede KI-generierte Änderung
