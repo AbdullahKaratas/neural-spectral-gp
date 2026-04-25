@@ -58,10 +58,39 @@ def oracle_posterior(
 
 
 def marginal_log_likelihood(model) -> float:
-    """Best marginal log-likelihood seen during training (negated training loss)."""
-    if model.best_loss is None:
-        raise RuntimeError("Model not fitted yet.")
-    return -model.best_loss
+    """Marginal log-likelihood of the training data under the fitted model.
+
+    All models recompute directly from the restored best weights:
+    - StandardGP / DKLGP: exact MLL via ExactMarginalLogLikelihood.
+    - NeuralGSMGP: MAP objective minus the Gaussian weight prior
+      (GPyTorch includes the AddedLossTerm automatically).
+    - F-SDN: low-rank MLL via log_marginal_likelihood.
+    """
+    if isinstance(model, (StandardGP, DKLGP, NeuralGSMGP)):
+        if model.model is None:
+            raise RuntimeError("Model not fitted yet.")
+        mll_obj = gpytorch.mlls.ExactMarginalLogLikelihood(model.likelihood, model.model)
+        X_train = model.model.train_inputs[0]
+        y_train = model.model.train_targets
+        model.model.train(); model.likelihood.train()
+        try:
+            with torch.no_grad():
+                map_val = mll_obj(model.model(X_train), y_train)
+                if isinstance(model, NeuralGSMGP):
+                    # Remove the weight prior (AddedLossTerm is included by GPyTorch)
+                    map_val = map_val - model.kernel._added_loss_terms["nn_weight_prior"].loss()
+        finally:
+            model.model.eval(); model.likelihood.eval()
+        return float(map_val.item())
+    if isinstance(model, FactorizedSpectralDensityNetwork):
+        if model.X_train is None:
+            raise RuntimeError("Model not fitted yet.")
+        with torch.no_grad():
+            L = model.compute_lowrank_features(model.X_train)
+            noise_var = torch.exp(model.log_noise_var)
+            nll = model.log_marginal_likelihood(L, model.y_train, noise_var)
+        return float(-nll.item())
+    raise TypeError(f"Unsupported model type: {type(model).__name__}")
 
 
 def noise_variance(model) -> float:
