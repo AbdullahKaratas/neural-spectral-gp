@@ -8,9 +8,9 @@ from ..kernel.deep_kernel import FeatureExtractor
 class ExactDKLGP(gpytorch.models.ExactGP):
     def __init__(self, train_x, train_y, likelihood, feature_extractor):
         super().__init__(train_x, train_y, likelihood)
-        self.mean_module = gpytorch.means.ZeroMean()
-        self.covar_module = gpytorch.kernels.ScaleKernel(gpytorch.kernels.RBFKernel())
         self.feature_extractor = feature_extractor
+        self.mean_module = gpytorch.means.ZeroMean()
+        self.covar_module = gpytorch.kernels.ScaleKernel(gpytorch.kernels.RBFKernel(ard_num_dims=feature_extractor.output_dim))
         self.scale_to_bounds = gpytorch.utils.grid.ScaleToBounds(-1., 1.)
 
     def forward(self, x):

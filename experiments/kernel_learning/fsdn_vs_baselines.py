@@ -11,6 +11,7 @@ from nsgp.kernel import LocalStationaryKernel, HarmonizableMixtureKernel
 from nsgp.models import FactorizedSpectralDensityNetwork
 from nsgp.models import NeuralGSMGP
 from nsgp.models import StandardGP
+from nsgp.models import DKLGP
 
 
 def make_hmk():
@@ -94,6 +95,12 @@ def run_single_comparison(
     K_ngsm = ngsm.compute_covariance(X_test)
     error_ngsm = torch.norm(K_ngsm - K_true_test) / torch.norm(K_true_test)
 
+    # Deep Kernel Learning (Wilson et al. 2016) — paper-default architecture
+    dkl = DKLGP(input_dim=1)
+    dkl.fit(X_train, y_train, epochs=epochs, lr=0.01, verbose=False)
+    K_dkl = dkl.compute_covariance(X_test)
+    error_dkl = torch.norm(K_dkl - K_true_test) / torch.norm(K_true_test)
+
     # F-SDN
     sdnreal = FactorizedSpectralDensityNetwork(
         input_dim=1,
@@ -126,6 +133,7 @@ def run_single_comparison(
         "seed": seed,
         "error_rbf": error_rbf.item(),
         "error_ngsm": error_ngsm.item(),
+        "error_dkl": error_dkl.item(),
         "error_sdnreal": error_sdnreal.item(),
         "error_sdncomplex": error_sdncomplex.item(),
     }
@@ -144,6 +152,7 @@ def run_benchmark(kernel_fn, kernel_name: str, n_seeds: int = 5):
         results.append(result)
         print(f"RBF: {result['error_rbf']*100:.2f} %")
         print(f"Neural-GSM: {result['error_ngsm']*100:.2f}%")
+        print(f"DKL: {result['error_dkl']*100:.2f}%")
         print(f"F-SDN (real): {result['error_sdnreal']*100:.2f}%")
         print(f"F-SDN (complex): {result['error_sdncomplex']*100:.2f}%")
 
@@ -156,7 +165,7 @@ def run_benchmark(kernel_fn, kernel_name: str, n_seeds: int = 5):
     t_crit = stats.t.ppf(1 - alpha/2, n - 1)
 
     if n_seeds > 1:
-        for method, col in [("RBF", "error_rbf"), ("Neural-GSM", "error_ngsm"), ("F-SDN (real)", "error_sdnreal"), ("F-SDN (complex)", "error_sdncomplex")]:
+        for method, col in [("RBF", "error_rbf"), ("Neural-GSM", "error_ngsm"), ("DKL", "error_dkl"), ("F-SDN (real)", "error_sdnreal"), ("F-SDN (complex)", "error_sdncomplex")]:
             mean = df[col].mean()
             std = df[col].std(ddof=1)
             ci = t_crit * std / np.sqrt(n)
@@ -176,8 +185,8 @@ def main(n_seeds: int = 5):
     # Plot results
     fig, axes = plt.subplots(2, 1, figsize=(8, 8))
 
-    methods = ["RBF", "Neural-GSM", "F-SDN (real)", "F-SDN (complex)"]
-    columns = ["error_rbf", "error_ngsm", "error_sdnreal", "error_sdncomplex"]
+    methods = ["RBF", "Neural-GSM", "DKL", "F-SDN (real)", "F-SDN (complex)"]
+    columns = ["error_rbf", "error_ngsm", "error_dkl", "error_sdnreal", "error_sdncomplex"]
     colors = sns.cubehelix_palette(n_colors=len(methods), reverse=True)
 
     for ax, df, name in zip(axes, [df_lsk, df_hmk], ["Silverman LS", "HMK"]):
