@@ -10,11 +10,10 @@ import torch
 from scipy import stats
 
 from nsgp.kernel import HarmonizableMixtureKernel, LocalStationaryKernel
+from gpytorch.metrics import negative_log_predictive_density
 from nsgp.metrics import (
     kl_posterior,
-    log_pred_density_true_function,
     marginal_log_likelihood,
-    negative_log_predictive_density,
     noise_variance,
     oracle_posterior,
 )
@@ -26,7 +25,7 @@ from nsgp.models import (
 )
 
 
-METRIC_KEYS = ["k_error", "nlpd", "kl", "lpd_true", "mll", "noise_var"]
+METRIC_KEYS = ["k_error", "nlpd", "kl", "mll", "noise_var"]
 
 
 @dataclass
@@ -83,12 +82,11 @@ def _evaluate_one_method(
     y_train: torch.Tensor,
     X_test: torch.Tensor,
     y_test: torch.Tensor,
-    f_true_test: torch.Tensor,
     K_true_test: torch.Tensor,
     oracle_post,
     epochs: int,
 ) -> dict:
-    """Fit ``spec.factory()`` and compute the six metrics. NaN on any failure."""
+    """Fit ``spec.factory()`` and compute the five metrics. NaN on any failure."""
     out = {"method": spec.label, **{k: math.nan for k in METRIC_KEYS}}
     try:
         model = spec.factory()
@@ -104,8 +102,7 @@ def _evaluate_one_method(
         pred_dist = model._full_pred_dist(X_test)
         out["nlpd"] = float(negative_log_predictive_density(pred_dist, y_test).item())
         out["kl"] = float(kl_posterior(pred_dist, oracle_post).item())
-        out["lpd_true"] = float(log_pred_density_true_function(pred_dist, f_true_test).item())
-        out["mll"] = marginal_log_likelihood(model, X_train, y_train)
+        out["mll"] = marginal_log_likelihood(model)
         out["noise_var"] = noise_variance(model)
     except Exception as exc:  # noqa: BLE001 — single seeds are allowed to fail
         out["error_msg"] = f"{type(exc).__name__}: {exc}"
@@ -134,27 +131,13 @@ def run_single_comparison(
     f_train = (L @ torch.randn(n_train)).squeeze()
     y_train = f_train + math.sqrt(noise_var) * torch.randn(n_train)
 
-    # f_true(X_test) drawn jointly with f_train, so the oracle posterior and
-    # f_true_test are mutually consistent.
-    K_joint_cross = kernel_fn(X_test, X_train)
-    K_joint_test = kernel_fn(X_test, X_test)
-    A = K_true_train + noise_var * torch.eye(n_train)
-    L_A = torch.linalg.cholesky(A)
-    alpha = torch.cholesky_solve(f_train.unsqueeze(-1), L_A).squeeze(-1)
-    cond_mean = K_joint_cross @ alpha
-    V = torch.cholesky_solve(K_joint_cross.transpose(-1, -2), L_A)
-    cond_cov = K_joint_test - K_joint_cross @ V
-    cond_cov = 0.5 * (cond_cov + cond_cov.transpose(-1, -2))
-    cond_cov = cond_cov + 1e-6 * torch.eye(n_test)
-    f_true_test = cond_mean + torch.linalg.cholesky(cond_cov) @ torch.randn(n_test)
-    y_test = f_true_test + math.sqrt(noise_var) * torch.randn(n_test)
-
     oracle_post = oracle_posterior(kernel_fn, X_train, y_train, X_test, noise_var=noise_var)
+    y_test = oracle_post.sample()
 
     rows = []
     for spec in make_methods():
         row = _evaluate_one_method(
-            spec, X_train, y_train, X_test, y_test, f_true_test, K_true_test,
+            spec, X_train, y_train, X_test, y_test, K_true_test,
             oracle_post, epochs,
         )
         row["seed"] = seed
@@ -207,7 +190,6 @@ def render_table(summary: pd.DataFrame, dataset_name: str) -> str:
         ("k_error",  "K-error %",       lambda v: f"{v*100:.1f}",  lambda c: f"±{c*100:.1f}"),
         ("nlpd",     "NLPD",            lambda v: f"{v:.2f}",      lambda c: f"±{c:.2f}"),
         ("kl",       "KL(fit‖oracle)",  lambda v: f"{v:.2f}",      lambda c: f"±{c:.2f}"),
-        ("lpd_true", "LPD(f_true)",     lambda v: f"{v:.1f}",      lambda c: f"±{c:.1f}"),
         ("mll",      "MLL",             lambda v: f"{v:.1f}",      lambda c: f"±{c:.1f}"),
         ("noise_var","σ²_noise",        lambda v: f"{v:.2e}",      lambda c: f"±{c:.0e}"),
     ]
@@ -232,12 +214,11 @@ def render_table(summary: pd.DataFrame, dataset_name: str) -> str:
 
 
 def plot_metrics(summary: pd.DataFrame, dataset_name: str, ax_grid):
-    """Five panels in a row, one per metric (noise_var omitted, lives in table)."""
+    """Four panels in a row, one per metric (noise_var omitted, lives in table)."""
     panel_metrics = [
         ("k_error",  "K-error",          True),
         ("nlpd",     "NLPD",             False),
         ("kl",       "KL(fit‖oracle)",   True),
-        ("lpd_true", "LPD(f_true)",      False),
         ("mll",      "MLL",              False),
     ]
     methods = summary["method"].tolist()
@@ -261,7 +242,7 @@ def plot_metrics(summary: pd.DataFrame, dataset_name: str, ax_grid):
 
 
 def make_summary_plot(summary_lsk, summary_hmk, path):
-    fig, axes = plt.subplots(2, 5, figsize=(16, 7))
+    fig, axes = plt.subplots(2, 4, figsize=(13, 7))
     plot_metrics(summary_lsk, "Silverman LS", axes[0])
     plot_metrics(summary_hmk, "HMK",          axes[1])
     fig.suptitle("Kernel learning baselines — posterior-quality metrics",
