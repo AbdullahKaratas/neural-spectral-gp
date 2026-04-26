@@ -89,7 +89,8 @@ def marginal_log_likelihood(model) -> float:
             L = model.compute_lowrank_features(model.X_train)
             noise_var = torch.exp(model.log_noise_var)
             nll = model.log_marginal_likelihood(L, model.y_train, noise_var)
-        return float(-nll.item())
+        n = model.X_train.shape[0]
+        return float(-nll.item() / n)
     raise TypeError(f"Unsupported model type: {type(model).__name__}")
 
 
