@@ -124,15 +124,16 @@ def run_single_comparison(
     X_train = torch.linspace(-5, 5, n_train).unsqueeze(-1)
     X_test = torch.linspace(-10, 10, n_test).unsqueeze(-1)
 
-    K_true_train = kernel_fn(X_train, X_train)
-    K_true_test = kernel_fn(X_test, X_test)
+    XX = torch.cat([X_train, X_test], dim=0)
+    K_joint = kernel_fn(XX, XX)
+    n = n_train + n_test
+    L = torch.linalg.cholesky(K_joint + noise_var * torch.eye(n))
+    y = (L @ torch.randn(n)).squeeze()
+    y_train, y_test = y[:n_train], y[n_train:]
 
-    L = torch.linalg.cholesky(K_true_train + noise_var * torch.eye(n_train))
-    f_train = (L @ torch.randn(n_train)).squeeze()
-    y_train = f_train + math.sqrt(noise_var) * torch.randn(n_train)
+    K_true_test = K_joint[n_train:, n_train:]
 
     oracle_post = oracle_posterior(kernel_fn, X_train, y_train, X_test, noise_var=noise_var)
-    y_test = oracle_post.sample()
 
     rows = []
     for spec in make_methods():
