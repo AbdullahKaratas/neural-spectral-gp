@@ -206,7 +206,7 @@ def render_table(summary: pd.DataFrame, dataset_name: str) -> str:
         ("nlpd",     "NLPD",            lambda v: f"{v:.2f}",      lambda c: f"±{c:.2f}"),
         ("kl",       "KL(fit‖oracle)",  lambda v: f"{v:.2f}",      lambda c: f"±{c:.2f}"),
         ("mll",      "MLL",             lambda v: f"{v:.1f}",      lambda c: f"±{c:.1f}"),
-        ("noise_var","noise_var",           lambda v: f"{v:.2e}",      lambda c: f"±{c:.0e}"),
+        ("noise_var","noise_var",       lambda v: f"{v:.2e}",      lambda c: f"±{c:.0e}"),
     ]
     header = "| Method | n | " + " | ".join(h[1] for h in header_metrics) + " |"
     sep = "|" + "---|" * (2 + len(header_metrics))
