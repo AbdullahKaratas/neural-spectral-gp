@@ -4,12 +4,12 @@ title: "neural-spectral-gp"
 abstract: "Reference implementation of Neural Spectral Gaussian Processes: a hybrid framework combining neural networks with Regular Nonstationary Fourier Features for efficient simulation of nonstationary Gaussian processes."
 type: software
 authors:
-  - family-names: Karatas
-    given-names: Abdullah
-    orcid: https://orcid.org/0009-0000-2463-6351
   - family-names: Jawaid
     given-names: Arsalan
     orcid: https://orcid.org/0000-0001-9951-4164
+  - family-names: Karatas
+    given-names: Abdullah
+    orcid: https://orcid.org/0009-0000-2463-6351
   - family-names: Seewig
     given-names: Joerg
     orcid: https://orcid.org/0000-0002-1420-1597
@@ -27,12 +27,12 @@ preferred-citation:
   type: article
   title: "Regular Fourier Features for Nonstationary Gaussian Processes"
   authors:
-    - family-names: Karatas
-      given-names: Abdullah
-      orcid: https://orcid.org/0009-0000-2463-6351
     - family-names: Jawaid
       given-names: Arsalan
       orcid: https://orcid.org/0000-0001-9951-4164
+    - family-names: Karatas
+      given-names: Abdullah
+      orcid: https://orcid.org/0009-0000-2463-6351
     - family-names: Seewig
       given-names: Joerg
       orcid: https://orcid.org/0000-0002-1420-1597

@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**Authors**: Abdullah Karatas, Arsalan Jawaid, Joerg Seewig
+**Authors**: Arsalan Jawaid, Abdullah Karatas, Joerg Seewig
 
 ---
 
@@ -76,9 +76,9 @@ pytest tests/
 See [`CITATION.cff`](CITATION.cff) for machine-readable metadata, or use:
 
 ```bibtex
-@article{karatas2026regular,
+@article{jawaid2026regular,
   title={Regular Fourier Features for Nonstationary Gaussian Processes},
-  author={Karatas, Abdullah and Jawaid, Arsalan and Seewig, Joerg},
+  author={Jawaid, Arsalan and Karatas, Abdullah and Seewig, Joerg},
   journal={arXiv preprint},
   year={2026}
 }

@@ -8,7 +8,7 @@ Evaluation:
 - Posterior predictions with uncertainty
 - Kernel matrix approximation error (relative Frobenius norm)
 
-Authors: Abdullah Karatas, Arsalan Jawaid
+Authors: Arsalan Jawaid, Abdullah Karatas
 """
 
 import torch
