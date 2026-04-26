@@ -2,10 +2,8 @@ import math
 from dataclasses import dataclass
 from typing import Callable, List
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import seaborn as sns
 import torch
 from scipy import stats
 
@@ -169,14 +167,18 @@ def run_benchmark(
         )
         all_rows.extend(rows)
         for r in rows:
-            kerr = "NaN" if math.isnan(r["k_error"]) else f"{r['k_error']*100:.2f}%"
-            nlpd = "NaN" if math.isnan(r["nlpd"]) else f"{r['nlpd']:.3f}"
-            print(f"  {r['method']:<16} K-err={kerr:>10}  NLPD={nlpd:>8}")
+            def _fmt(v, fmt): return "NaN" if math.isnan(v) else fmt.format(v)
+            kerr = _fmt(r["k_error"], "{:.2%}")
+            nlpd = _fmt(r["nlpd"], "{:.3f}")
+            kl   = _fmt(r["kl"],    "{:.3f}")
+            mll  = _fmt(r["mll"],   "{:.3f}")
+            nv   = _fmt(r["noise_var"], "{:.2e}")
+            print(f"  {r['method']:<16} K-err={kerr:>10}  NLPD={nlpd:>8}  KL={kl:>8}  MLL={mll:>8}  noise={nv:>10}")
     return pd.DataFrame(all_rows)
 
 
 def summarise(df: pd.DataFrame) -> pd.DataFrame:
-    """Per-method mean ± 95% CI over non-NaN seeds, in long format."""
+    """Per-method mean +- 95% CI over non-NaN seeds, in long format."""
     rows = []
     for method, sub in df.groupby("method", sort=False):
         n_total = len(sub)
@@ -200,7 +202,7 @@ def summarise(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def render_table(summary: pd.DataFrame, dataset_name: str) -> str:
-    """Markdown table: methods × metrics with mean ± CI and n_ok/n_total."""
+    """Markdown table: methods x metrics with mean +- CI and n_ok/n_total."""
     header_metrics = [
         ("k_error",  "K-error %",       lambda v: f"{v*100:.1f}",  lambda c: f"±{c*100:.1f}"),
         ("nlpd",     "NLPD",            lambda v: f"{v:.2f}",      lambda c: f"±{c:.2f}"),
@@ -226,41 +228,6 @@ def render_table(summary: pd.DataFrame, dataset_name: str) -> str:
                 cells.append(f"{fmt_v(mean)} {fmt_c(ci)}")
         lines.append("| " + " | ".join(cells) + " |")
     return "\n".join(lines)
-
-
-def plot_metrics(summary: pd.DataFrame, dataset_name: str, ax_grid):
-    """Four panels in a row, one per metric (noise_var omitted, lives in table)."""
-    panel_metrics = [
-        ("k_error",  "K-error",          True),
-        ("nlpd",     "NLPD",             False),
-        ("kl",       "KL(fit‖oracle)",   True),
-        ("mll",      "MLL",              False),
-    ]
-    methods = summary["method"].tolist()
-    colors = sns.cubehelix_palette(n_colors=len(methods), reverse=True)
-    for ax, (key, label, log_y) in zip(ax_grid, panel_metrics):
-        means = summary[f"{key}_mean"].values
-        if key == "k_error":
-            means = means * 100
-            label = "K-error %"
-        ax.bar(methods, means, color=colors, edgecolor="black", width=0.7)
-        ax.set_title(label, fontsize=10)
-        ax.tick_params(axis="x", rotation=35, labelsize=8)
-        if log_y:
-            # Use symlog so negative/zero values still render.
-            ax.set_yscale("symlog")
-    ax_grid[0].set_ylabel(dataset_name, fontsize=11, fontweight="bold")
-
-
-def make_summary_plot(summary_lsk, summary_hmk, path):
-    fig, axes = plt.subplots(2, 4, figsize=(13, 7))
-    plot_metrics(summary_lsk, "Silverman LS", axes[0])
-    plot_metrics(summary_hmk, "HMK",          axes[1])
-    fig.suptitle("Kernel learning baselines — posterior-quality metrics",
-                 fontsize=13)
-    fig.tight_layout()
-    fig.savefig(path, dpi=150)
-    plt.close(fig)
 
 
 def main():
