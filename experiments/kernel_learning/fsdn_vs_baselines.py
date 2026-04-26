@@ -268,7 +268,7 @@ def main():
     # Specific seeds creates meaning full data / no constant data
     df_lsk = run_benchmark(
         lsk.kernel, "Silverman Locally Stationary",
-        seeds=(42, 44, 45, 46, 47), x_lo=-5.0, x_hi=5.0, noise_var=1e-4, include_complex=False,
+        seeds=(42, 44, 45, 46, 47), x_lo=-5.0, x_hi=5.0, noise_var=1e-3, include_complex=False,
     )
 
     # Specific seeds creates meaning full data / no constant data
