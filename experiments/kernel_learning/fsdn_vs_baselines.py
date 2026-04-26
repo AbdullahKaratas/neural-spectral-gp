@@ -35,8 +35,8 @@ class MethodSpec:
     factory: Callable[[], object]
 
 
-def make_methods() -> List[MethodSpec]:
-    return [
+def make_methods(include_complex: bool = True) -> List[MethodSpec]:
+    methods = [
         MethodSpec("RBF", lambda: StandardGP()),
         MethodSpec("Neural-GSM", lambda: NeuralGSMGP(
             input_dim=1, n_components=2, hidden_dims=[32, 32], prior_variance=1.0,
@@ -46,11 +46,13 @@ def make_methods() -> List[MethodSpec]:
             input_dim=1, hidden_dims=[128, 128], rank=8, n_features=256,
             omega_max=10.0, enforce_symmetry=False, spectral_real=True,
         )),
-        MethodSpec("F-SDN (complex)", lambda: FactorizedSpectralDensityNetwork(
+    ]
+    if include_complex:
+        methods.append(MethodSpec("F-SDN (complex)", lambda: FactorizedSpectralDensityNetwork(
             input_dim=1, hidden_dims=[128, 128], rank=8, n_features=256,
             omega_max=10.0, enforce_symmetry=False, spectral_real=False,
-        )),
-    ]
+        )))
+    return methods
 
 
 def make_hmk():
@@ -113,16 +115,19 @@ def run_single_comparison(
     kernel_fn,
     seed: int,
     n_train: int = 50,
-    n_test: int = 100,
+    n_test: int = 50,
     epochs: int = 4000,
     noise_var: float = 1e-4,
+    x_lo: float = -5.0,
+    x_hi: float = 5.0,
+    include_complex: bool = True,
 ) -> List[dict]:
     """Return one dict per method for the given seed (long format)."""
     torch.manual_seed(seed)
     np.random.seed(seed)
 
-    X_train = torch.linspace(-5, 5, n_train).unsqueeze(-1)
-    X_test = torch.linspace(-10, 10, n_test).unsqueeze(-1)
+    X_train = torch.linspace(x_lo, x_hi, n_train).unsqueeze(-1)
+    X_test, _ = torch.sort(torch.rand(n_test, 1) * (x_hi - x_lo) + x_lo, dim=0)
 
     XX = torch.cat([X_train, X_test], dim=0)
     K_joint = kernel_fn(XX, XX)
@@ -136,7 +141,7 @@ def run_single_comparison(
     oracle_post = oracle_posterior(kernel_fn, X_train, y_train, X_test, noise_var=noise_var)
 
     rows = []
-    for spec in make_methods():
+    for spec in make_methods(include_complex=include_complex):
         row = _evaluate_one_method(
             spec, X_train, y_train, X_test, y_test, K_true_test,
             oracle_post, epochs,
@@ -146,13 +151,22 @@ def run_single_comparison(
     return rows
 
 
-def run_benchmark(kernel_fn, kernel_name: str, n_seeds: int = 5) -> pd.DataFrame:
+def run_benchmark(
+    kernel_fn,
+    kernel_name: str,
+    seeds: tuple = (42, 43),
+    x_lo: float = -5.0,
+    x_hi: float = 5.0,
+    noise_var: float = 1e-4,
+    include_complex: bool = True,
+) -> pd.DataFrame:
     print(f"Benchmark: {kernel_name}")
     all_rows = []
-    for i in range(n_seeds):
-        seed = i + 42
-        print(f"Seed {i+1}/{n_seeds} (seed={seed})")
-        rows = run_single_comparison(kernel_fn, seed=seed)
+    for i, seed in enumerate(seeds):
+        print(f"Seed {i+1}/{len(seeds)} (seed={seed})")
+        rows = run_single_comparison(
+            kernel_fn, seed=seed, x_lo=x_lo, x_hi=x_hi, noise_var=noise_var, include_complex=include_complex,
+        )
         all_rows.extend(rows)
         for r in rows:
             kerr = "NaN" if math.isnan(r["k_error"]) else f"{r['k_error']*100:.2f}%"
@@ -249,10 +263,19 @@ def make_summary_plot(summary_lsk, summary_hmk, path):
     plt.close(fig)
 
 
-def main(n_seeds: int = 5):
+def main():
     lsk = LocalStationaryKernel(a=0.5)
-    df_lsk = run_benchmark(lsk.kernel, "Silverman Locally Stationary", n_seeds=n_seeds)
-    df_hmk = run_benchmark(hmk_real_kernel, "Harmonizable Mixture Kernel", n_seeds=n_seeds)
+    # Specific seeds creates meaning full data / no constant data
+    df_lsk = run_benchmark(
+        lsk.kernel, "Silverman Locally Stationary",
+        seeds=(42, 44, 45, 46, 47), x_lo=-5.0, x_hi=5.0, noise_var=1e-4, include_complex=False,
+    )
+
+    # Specific seeds creates meaning full data / no constant data
+    df_hmk = run_benchmark(
+        hmk_real_kernel, "Harmonizable Mixture Kernel",
+        seeds=(42, 43, 45, 46, 47), x_lo=-2.0, x_hi=2.0, noise_var=1e-2,
+    )
 
     summary_lsk = summarise(df_lsk)
     summary_hmk = summarise(df_hmk)
