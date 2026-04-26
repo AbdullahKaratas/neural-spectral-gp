@@ -42,13 +42,13 @@ def make_methods(include_complex: bool = True) -> List[MethodSpec]:
         MethodSpec("DKL", lambda: DKLGP(input_dim=1)),
         MethodSpec("F-SDN (real)", lambda: FactorizedSpectralDensityNetwork(
             input_dim=1, hidden_dims=[128, 128], rank=8, n_features=256,
-            omega_max=10.0, enforce_symmetry=False, spectral_real=True,
+            omega_max=10.0, enforce_symmetry=False, spectral_real=True, prior_variance=1.0
         )),
     ]
     if include_complex:
         methods.append(MethodSpec("F-SDN (complex)", lambda: FactorizedSpectralDensityNetwork(
             input_dim=1, hidden_dims=[128, 128], rank=8, n_features=256,
-            omega_max=10.0, enforce_symmetry=False, spectral_real=False,
+            omega_max=10.0, enforce_symmetry=False, spectral_real=False, prior_variance=1.0
         )))
     return methods
 
