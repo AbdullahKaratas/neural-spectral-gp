@@ -191,7 +191,7 @@ def render_table(summary: pd.DataFrame, dataset_name: str) -> str:
         ("nlpd",     "NLPD",            lambda v: f"{v:.2f}",      lambda c: f"±{c:.2f}"),
         ("kl",       "KL(fit‖oracle)",  lambda v: f"{v:.2f}",      lambda c: f"±{c:.2f}"),
         ("mll",      "MLL",             lambda v: f"{v:.1f}",      lambda c: f"±{c:.1f}"),
-        ("noise_var","σ²_noise",        lambda v: f"{v:.2e}",      lambda c: f"±{c:.0e}"),
+        ("noise_var","noise_var",           lambda v: f"{v:.2e}",      lambda c: f"±{c:.0e}"),
     ]
     header = "| Method | n | " + " | ".join(h[1] for h in header_metrics) + " |"
     sep = "|" + "---|" * (2 + len(header_metrics))
@@ -225,14 +225,10 @@ def plot_metrics(summary: pd.DataFrame, dataset_name: str, ax_grid):
     colors = sns.cubehelix_palette(n_colors=len(methods), reverse=True)
     for ax, (key, label, log_y) in zip(ax_grid, panel_metrics):
         means = summary[f"{key}_mean"].values
-        cis = np.where(pd.isna(summary[f"{key}_ci95"].values), 0.0,
-                       summary[f"{key}_ci95"].values)
         if key == "k_error":
             means = means * 100
-            cis = cis * 100
             label = "K-error %"
-        ax.bar(methods, means, yerr=cis, capsize=4,
-               color=colors, edgecolor="black", width=0.7)
+        ax.bar(methods, means, color=colors, edgecolor="black", width=0.7)
         ax.set_title(label, fontsize=10)
         ax.tick_params(axis="x", rotation=35, labelsize=8)
         if log_y:
