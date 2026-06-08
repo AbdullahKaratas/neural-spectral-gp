@@ -307,7 +307,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         sigma2: torch.Tensor
     ) -> torch.Tensor:
         r"""
-        Compute GP marginal likelihood using low-rank NFF approximation.
+        Compute negative marginal likelihood using low-rank NFF approximation.
 
         Given K = LL^T + \sigma^2 I, use:
             (LL^T + \sigma^2 I)^(-1) = (1/\sigma^2)[I - L(\sigma^2 I + L^TL)^(-1)L^T]
