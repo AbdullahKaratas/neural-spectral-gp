@@ -7,6 +7,8 @@ import gpytorch
 import numpy as np
 from typing import Optional, List
 
+from linear_operator.operators import DenseLinearOperator, DiagLinearOperator, LowRankRootLinearOperator
+
 
 class FactorizedSpectralDensityNetwork(nn.Module):
     """
@@ -151,56 +153,6 @@ class FactorizedSpectralDensityNetwork(nn.Module):
             'elu': nn.ELU(),
             'tanh': nn.Tanh(),
         }.get(activation, nn.ELU())
-
-    def _safe_cholesky(
-        self,
-        A: torch.Tensor,
-        jitter: float = 1e-6,
-        max_attempts: int = 4
-    ) -> torch.Tensor:
-        """
-        Attempts Cholesky decomposition with increasing jitter values.
-
-        Parameters
-        ----------
-        A : torch.Tensor, shape (..., n, n)
-            Symmetric positive semi-definite matrix
-        jitter : float
-            Initial jitter value to add to diagonal
-        max_attempts : int
-            Maximum number of attempts with increasing jitter
-
-        Returns
-        -------
-        L : torch.Tensor, shape (..., n, n)
-            Lower triangular Cholesky factor
-
-        Raises
-        ------
-        RuntimeError
-            If Cholesky fails after all attempts
-        """
-        current_jitter = jitter
-
-        for attempt in range(max_attempts):
-            A_jittered = A + current_jitter * torch.eye(
-                A.shape[-1], device=A.device, dtype=A.dtype
-            )
-
-            try:
-                L = torch.linalg.cholesky(A_jittered)
-                if attempt > 0:
-                    warnings.warn(
-                        f"Cholesky succeeded with jitter={current_jitter:.1e} after {attempt + 1} attempts"
-                    )
-                return L
-            except RuntimeError:
-                if attempt == max_attempts - 1:
-                    raise RuntimeError(
-                        f"Cholesky failed after {max_attempts} attempts with jitter up to {current_jitter:.1e}. "
-                        "Matrix might not be positive-definite."
-                    )
-                current_jitter *= 10
 
     def log_prior(self) -> torch.Tensor:
         """Gaussian prior on NN weights: log p(W) = -0.5/prior_variance * ||W||^2."""
@@ -357,7 +309,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         sigma2: torch.Tensor
     ) -> torch.Tensor:
         r"""
-        Compute GP marginal likelihood using low-rank NFF approximation.
+        Compute negative marginal likelihood using low-rank NFF approximation.
 
         Given K = LL^T + \sigma^2 I, use:
             (LL^T + \sigma^2 I)^(-1) = (1/\sigma^2)[I - L(\sigma^2 I + L^TL)^(-1)L^T]
@@ -404,32 +356,9 @@ class FactorizedSpectralDensityNetwork(nn.Module):
                 f"Low-rank approximation is inefficient in this regime. Consider r <= n."
             )
 
-        # Woodbury formula with numerical stability
-        # Compute W = sigma^2 I_r + L^T L
-        W = sigma2 * torch.eye(r, device=L.device, dtype=L.dtype) + (L.T @ L)
-
-        # Compute Cholesky
-        Lw = self._safe_cholesky(W, jitter=1e-6, max_attempts=4)
-
-        # Solve (LL^T + sigma^2 I)^(-1) y using Woodbury formula
-        # alpha = (1/sigma^2)[y - L W^(-1) L^T y]
-        LT_y = L.T @ y  # (r,)
-        W_inv_LT_y = torch.cholesky_solve(LT_y.unsqueeze(-1), Lw).squeeze() # stable solve
-        alpha = (1/sigma2) * (y - (L @ W_inv_LT_y))  # (n,)
-
-        # Data fit term: y^T alpha
-        data_fit = torch.dot(y, alpha)
-
-        # Log determinant using Sylvester's determinant identity:
-        # |LL^T + sigma^2 I| = |sigma^2 I|   |I_r + L^T(sigma^2 I)^{-1}L|
-        #               = (sigma^2)^n   |I_r + (1/sigma^2 )L^TL|
-        #               = (sigma^2)^n   (1/sigma^2)^r   |sigma^2 I_r + L^TL|
-        #               = (sigma^2)^{n-r}  |W|
-        # where W = sigma^2I_r + L^TL
-        # Therefore: log|LL^T + sigma^2I| = (n-r) log(sigma^2) + log|W|
-        log_det_sigma = (n - r) * torch.log(torch.as_tensor(sigma2))
-        log_det_W = 2 * torch.sum(torch.log(torch.diag(Lw)))  # log|W| = 2·sum(log(diag(Lw)))
-        log_det = log_det_sigma + log_det_W
+        # Woodbury and log determinant formula with linear_operator
+        covar = LowRankRootLinearOperator(L) + DiagLinearOperator(sigma2 * torch.ones(n, device=L.device, dtype=L.dtype))
+        data_fit, log_det = covar.inv_quad_logdet(inv_quad_rhs=y.unsqueeze(-1), logdet=True)
 
         # Negative log marginal likelihood
         nll = 0.5 * (data_fit + log_det + n * math.log(2.0 * math.pi))
@@ -574,9 +503,10 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         self,
         X_test: torch.Tensor,
         predictive_dist: bool = True,
+        diag: bool = False,
     ) -> gpytorch.distributions.MultivariateNormal:
         """
-        Return the full joint predictive distribution.
+        Return the posterior distribution.
 
         Parameters
         ----------
@@ -584,6 +514,8 @@ class FactorizedSpectralDensityNetwork(nn.Module):
             Test locations.
         predictive_dist : bool
             If True, include observation noise.
+        diag : bool
+            If True, computes only the diagonal covariance.
 
         Returns
         -------
@@ -594,37 +526,34 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         
         with torch.no_grad():
 
-            noise_var = torch.exp(self.log_noise_var).item()
+            noise = torch.exp(self.log_noise_var)
 
             L = self.compute_lowrank_features(self.X_train)
             _, rank_4r = L.shape
 
-            G = L.T @ L
-            M = noise_var * torch.eye(rank_4r, device=L.device) + G
-            M_chol = torch.linalg.cholesky(M)
-
-            Lty = L.T @ self.y_train
-            M_inv_Lty = torch.cholesky_solve(Lty.unsqueeze(-1), M_chol).squeeze(-1)
-            beta = (Lty - G @ M_inv_Lty) / noise_var
-
-            M_inv_G = torch.cholesky_solve(G, M_chol)
-            LtSigmaInvL = (G - G @ M_inv_G) / noise_var
-            Q = torch.eye(rank_4r, device=L.device) - LtSigmaInvL
-
+            M = DenseLinearOperator(L.mT @ L) + DiagLinearOperator(noise * torch.ones(rank_4r, dtype=L.dtype, device=L.device))
             L_star = self.compute_lowrank_features(X_test)
 
-            # Posterior mean and variance
-            mean = L_star @ beta
-            covar = L_star @ Q @ L_star.T
-            if predictive_dist:
-                covar = covar + noise_var * torch.eye(L_star.shape[0], device=L_star.device)
+            # Posterior mean
+            beta = M.solve(L.mT @ self.y_train.unsqueeze(-1))
+            mean = (L_star @ beta).squeeze(-1)
 
-        return gpytorch.distributions.MultivariateNormal(mean, covar)
+            # Posterior covar
+            if diag:
+                var = noise * (L_star * M.solve(L_star.mT).mT).sum(dim=1)
+                if predictive_dist:
+                    var = var + noise
+                return gpytorch.distributions.MultivariateNormal(mean, DiagLinearOperator(var))
+            else:
+                covar = noise * (L_star @ M.solve(L_star.mT))
+                if predictive_dist:
+                    covar = covar + noise * torch.eye(L_star.shape[0], dtype=L_star.dtype, device=L_star.device)
+                return gpytorch.distributions.MultivariateNormal(mean, covar)
 
     def predict(self, X_test, predictive_dist=True):
         """
-        Posterior prediction using Low-rank approximation.
+        Posterior using Low-rank approximation.
         """
-        pred = self._full_pred_dist(X_test, predictive_dist=predictive_dist)
+        pred = self._full_pred_dist(X_test, predictive_dist=predictive_dist, diag=True)
         var = torch.clamp(pred.variance, min=1e-6)
         return pred.mean, torch.sqrt(var)

@@ -21,6 +21,7 @@ dependencies = [
     "scipy>=1.10.0",
     "matplotlib>=3.7.2",
     "gpytorch>=1.11",
+    "linear_operator>=0.6.1"
 ]
 
 # general development
