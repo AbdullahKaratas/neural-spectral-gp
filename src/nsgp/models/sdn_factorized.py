@@ -69,7 +69,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
             spacing = omega_max / self.n_features
             self.register_buffer(
                 "omega_grid",
-                torch.arange(0, self.n_features).reshape(-1, 1).float()
+                torch.arange(0, self.n_features).reshape(-1, 1).to(torch.get_default_dtype())
                 * spacing,
             )
         else:
@@ -77,7 +77,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
             spacing = omega_max / float(k)
             self.register_buffer(
                 "omega_grid",
-                torch.arange(-k + 1, k).reshape(-1, 1).float()
+                torch.arange(-k + 1, k).reshape(-1, 1).to(torch.get_default_dtype())
                 * spacing,
             )
             self.n_features = 2 * k - 1
