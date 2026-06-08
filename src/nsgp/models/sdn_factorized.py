@@ -506,7 +506,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         diag: bool = False,
     ) -> gpytorch.distributions.MultivariateNormal:
         """
-        Return the full joint predictive distribution.
+        Return the posterior distribution.
 
         Parameters
         ----------
@@ -552,7 +552,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
 
     def predict(self, X_test, predictive_dist=True):
         """
-        Posterior prediction using Low-rank approximation.
+        Posterior using Low-rank approximation.
         """
         pred = self._full_pred_dist(X_test, predictive_dist=predictive_dist, diag=True)
         var = torch.clamp(pred.variance, min=1e-6)
