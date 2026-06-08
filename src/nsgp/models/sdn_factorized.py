@@ -152,56 +152,6 @@ class FactorizedSpectralDensityNetwork(nn.Module):
             'tanh': nn.Tanh(),
         }.get(activation, nn.ELU())
 
-    def _safe_cholesky(
-        self,
-        A: torch.Tensor,
-        jitter: float = 1e-6,
-        max_attempts: int = 4
-    ) -> torch.Tensor:
-        """
-        Attempts Cholesky decomposition with increasing jitter values.
-
-        Parameters
-        ----------
-        A : torch.Tensor, shape (..., n, n)
-            Symmetric positive semi-definite matrix
-        jitter : float
-            Initial jitter value to add to diagonal
-        max_attempts : int
-            Maximum number of attempts with increasing jitter
-
-        Returns
-        -------
-        L : torch.Tensor, shape (..., n, n)
-            Lower triangular Cholesky factor
-
-        Raises
-        ------
-        RuntimeError
-            If Cholesky fails after all attempts
-        """
-        current_jitter = jitter
-
-        for attempt in range(max_attempts):
-            A_jittered = A + current_jitter * torch.eye(
-                A.shape[-1], device=A.device, dtype=A.dtype
-            )
-
-            try:
-                L = torch.linalg.cholesky(A_jittered)
-                if attempt > 0:
-                    warnings.warn(
-                        f"Cholesky succeeded with jitter={current_jitter:.1e} after {attempt + 1} attempts"
-                    )
-                return L
-            except RuntimeError:
-                if attempt == max_attempts - 1:
-                    raise RuntimeError(
-                        f"Cholesky failed after {max_attempts} attempts with jitter up to {current_jitter:.1e}. "
-                        "Matrix might not be positive-definite."
-                    )
-                current_jitter *= 10
-
     def log_prior(self) -> torch.Tensor:
         """Gaussian prior on NN weights: log p(W) = -0.5/prior_variance * ||W||^2."""
         weights = torch.cat([p.view(-1) for name, p in self.feature_net.named_parameters() if "weight" in name])
