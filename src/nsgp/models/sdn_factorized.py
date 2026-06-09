@@ -37,7 +37,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         Number of Fourier embeddings (Tancik et al., 2020). 0 disables the
         embedding. Default: 0.
     embedding_scale : float
-        Std of B \sim N(0, embedding_scale^2) (Tancik et al., 2020).
+        Std of B sim N(0, embedding_scale^2) (Tancik et al., 2020).
         Default: 1.0.
     """
 
