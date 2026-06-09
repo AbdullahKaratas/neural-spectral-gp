@@ -1,32 +1,42 @@
 import pytest
 import torch
 
-from src.nsgp.models.sdn_factorized import FactorizedSpectralDensityNetwork
+from nsgp.models.sdn_factorized import FactorizedSpectralDensityNetwork
 
 
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
 @pytest.mark.parametrize("enforce_symmetry", [False, True])
 def test_omega_grid_respects_default_dtype(dtype, enforce_symmetry):
-    """Regression for #25: omega_grid must follow torch's default dtype,
-    not be pinned to float32, so float64 inputs don't raise a mismatch."""
+    """omega_grid must follow torch's default dtype."""
     prev = torch.get_default_dtype()
     torch.set_default_dtype(dtype)
     try:
         model = FactorizedSpectralDensityNetwork(
             input_dim=1,
-            hidden_dims=[8],
-            rank=4,
-            n_features=11,
             enforce_symmetry=enforce_symmetry,
         )
 
-        # The buffer itself must match the active default dtype.
         assert model.omega_grid.dtype == dtype
 
         # And a forward pass with inputs of that dtype must not raise.
-        X = torch.linspace(0.0, 1.0, 16, dtype=dtype).reshape(-1, 1)
+        X = torch.linspace(0.0, 1.0, 10, dtype=dtype).reshape(-1, 1)
         L = model.compute_lowrank_features(X)
         assert L.dtype == dtype
         assert torch.isfinite(L).all()
     finally:
         torch.set_default_dtype(prev)
+
+
+@pytest.mark.parametrize("ed", [0, 8])
+def test_fourier_embedding(ed):
+    """Fourier embedding (Tancik et al., 2020) is off when embedding_dim=0
+    and on otherwise."""
+    model = FactorizedSpectralDensityNetwork(
+        input_dim=1, embedding_dim=ed,
+    )
+    # B (the random projection) exists iff the embedding is on.
+    assert hasattr(model, "B") == (ed > 0)
+
+    feat = model.compute_features(torch.linspace(-8, 8, 21).unsqueeze(-1))
+    assert feat.shape == (21, model.rank)
+    assert torch.isfinite(feat).all()
