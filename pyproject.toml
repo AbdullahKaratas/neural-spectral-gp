@@ -30,6 +30,7 @@ develop = [
     "pre-commit>=2.8.2",
     "pandas",
     "seaborn",
+    "optuna>=4.9.0",
     "pytest",
     "pytest-cov",
 ]
