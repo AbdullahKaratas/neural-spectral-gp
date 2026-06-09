@@ -12,12 +12,12 @@ We propose regular Fourier features for harmonizable Gaussian processes that dis
 
 ---
 
-## Installation
+## Development / Installation
 
 ```bash
-git clone https://github.com/mts-public/neural-spectral-gp.git
 cd neural-spectral-gp
 pip install -e .
+pre-commit install
 ```
 
 ---
