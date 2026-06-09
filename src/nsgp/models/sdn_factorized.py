@@ -33,6 +33,12 @@ class FactorizedSpectralDensityNetwork(nn.Module):
     spectral_real : bool
         If True, f(omega) is real-valued. If False, f(omega) is complex-valued.
         Incompatible with enforce_symmetry=True when False. (default=True)
+    embedding_dim : int
+        Number of Fourier embeddings (Tancik et al., 2020). 0 disables the
+        embedding. Default: 0.
+    embedding_scale : float
+        Std of B \sim N(0, embedding_scale^2) (Tancik et al., 2020).
+        Default: 1.0.
     """
 
     def __init__(
@@ -47,6 +53,8 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         spectral_real: bool = True,
         learn_log_scale: bool = True,
         prior_variance: Optional[float] = None,
+        embedding_dim: int = 0,
+        embedding_scale: float = 1.0,
     ):
         super().__init__()
         self.input_dim = input_dim
@@ -98,8 +106,18 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         # Initialize to log(0.5^2) for noise_std = 0.5
         self.log_noise_var = nn.Parameter(torch.tensor(math.log(0.25)))
 
+        # Fourier embedding for high frequency learning (Tancik et al, 2020)
+        self.embedding_dim = embedding_dim
+        if embedding_dim > 0:
+            self.register_buffer(
+                "B", torch.randn(input_dim, embedding_dim) * embedding_scale
+            )
+            mlp_input_dim = 2 * embedding_dim
+        else:
+            mlp_input_dim = input_dim
+
         output_dim = rank if spectral_real else 2 * rank
-        self.feature_net = self._build_mlp(input_dim, output_dim, hidden_dims, activation)
+        self.feature_net = self._build_mlp(mlp_input_dim, output_dim, hidden_dims, activation)
         self.best_loss = None
         self.X_train = None
         self.y_train = None
@@ -159,6 +177,14 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         weights = torch.cat([p.view(-1) for name, p in self.feature_net.named_parameters() if "weight" in name])
         return -0.5 * weights.norm().pow(2) / self.prior_variance
 
+    def _embed(self, omega: torch.Tensor) -> torch.Tensor:
+        """Fourier embedding."""
+
+        if self.embedding_dim > 0:
+            proj = (omega / self.omega_max) @ self.B
+            return torch.cat([torch.sin(proj), torch.cos(proj)], dim=-1)
+        return omega/self.omega_max
+
     def compute_features(self, omega: torch.Tensor) -> torch.Tensor:
         r"""
         Compute feature vector f(omega).
@@ -181,9 +207,9 @@ class FactorizedSpectralDensityNetwork(nn.Module):
 
         if self.enforce_symmetry:
             # Symmetrize: f(omega) = [tilde{f}(omega) + tilde{f}(-omega)] / 2
-            f = (self.feature_net(omega) + self.feature_net(-omega)) / 2.0
+            f = (self.feature_net(self._embed(omega)) + self.feature_net(self._embed(-omega))) / 2.0
         else:
-            f = self.feature_net(omega)
+            f = self.feature_net(self._embed(omega))
 
         if not self.spectral_real:
             f_re, f_im = f.chunk(2, dim=-1)
