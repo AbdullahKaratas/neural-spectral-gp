@@ -12,12 +12,12 @@ We propose regular Fourier features for harmonizable Gaussian processes that dis
 
 ---
 
-## Installation
+## Development / Installation
 
 ```bash
-git clone https://github.com/mts-public/neural-spectral-gp.git
 cd neural-spectral-gp
-pip install -e .
+pip install -e ".[develop]"
+pre-commit install
 ```
 
 ---
@@ -27,16 +27,17 @@ pip install -e .
 ```
 neural-spectral-gp/
 ├── src/nsgp/
-│   ├── kernel/                 # Kernel functions (Silverman, HMK, Neural-GSM)
+│   ├── kernel/                 # Kernel functions (Silverman, HMK, Neural-GSM, NN Kernel)
 │   │   ├── local_stationary.py
 │   │   ├── hmk.py
-│   │   └── neural_gsm.py
+│   │   ├── neural_gsm.py
+│   │   └── neural_network_kernel.py
 │   ├── lowrank/                # Fourier feature approximations
 │   │   ├── regular_nff.py      # Regular Fourier Features (Ours)
 │   │   └── random_nff.py       # Random Fourier Feature
 │   ├── models/                 # GP models
 │   │   ├── sdn_factorized.py   # Factorized Spectral Density Network (Ours)
-│   │   ├── standard_gp.py      # Exact GP Model with RBF
+│   │   ├── standard_gp.py      # Exact GP Model with configurable kernel
 │   │   └── neural_gsm_gp.py    # Exact GP Model with Neural-GSM
 │   └── utils.py
 ├── experiments/
@@ -62,6 +63,7 @@ Kernel learning:
 ```bash
 python experiments/kernel_learning/compare_local_stationary.py # FSDN vs RBF (posterior predictions on Silverman)
 python experiments/kernel_learning/fsdn_vs_rbf.py              # FSDN vs RBF (quantitative comparison on Silverman)
+python experiments/kernel_learning/solar.py                    # FSDN vs RBF vs NN kernel on the solar dataset
 ```
 
 Tests:
