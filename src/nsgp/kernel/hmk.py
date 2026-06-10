@@ -198,9 +198,7 @@ class HarmonizableMixtureKernel:
             omega2 = omega2.unsqueeze(-1)
 
         n1, n2 = omega1.shape[0], omega2.shape[0]
-        spectral_density = torch.zeros(
-            n1, n2, dtype=self._cdtype, device=omega1.device
-        )
+        spectral_density = torch.zeros(n1, n2, dtype=self._cdtype, device=omega1.device)
 
         omega_diff = omega1[:, None, :] - omega2[None, :, :]
 

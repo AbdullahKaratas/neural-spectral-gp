@@ -69,18 +69,25 @@ def marginal_log_likelihood(model) -> float:
     if isinstance(model, (StandardGP, DKLGP, NeuralGSMGP)):
         if model.model is None:
             raise RuntimeError("Model not fitted yet.")
-        mll_obj = gpytorch.mlls.ExactMarginalLogLikelihood(model.likelihood, model.model)
+        mll_obj = gpytorch.mlls.ExactMarginalLogLikelihood(
+            model.likelihood, model.model
+        )
         X_train = model.model.train_inputs[0]
         y_train = model.model.train_targets
-        model.model.train(); model.likelihood.train()
+        model.model.train()
+        model.likelihood.train()
         try:
             with torch.no_grad():
                 map_val = mll_obj(model.model(X_train), y_train)
                 if isinstance(model, NeuralGSMGP):
                     # Remove the weight prior (AddedLossTerm is included by GPyTorch)
-                    map_val = map_val - model.kernel._added_loss_terms["nn_weight_prior"].loss()
+                    map_val = (
+                        map_val
+                        - model.kernel._added_loss_terms["nn_weight_prior"].loss()
+                    )
         finally:
-            model.model.eval(); model.likelihood.eval()
+            model.model.eval()
+            model.likelihood.eval()
         return float(map_val.item())
     if isinstance(model, FactorizedSpectralDensityNetwork):
         if model.X_train is None:

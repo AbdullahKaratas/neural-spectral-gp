@@ -17,7 +17,7 @@ from nsgp.models.standard_gp import StandardGP
 
 def rbf(x1: torch.Tensor, x2: torch.Tensor, lengthscale: float = 1.0) -> torch.Tensor:
     sq = (x1.unsqueeze(-2) - x2.unsqueeze(-3)).pow(2).sum(-1)
-    return torch.exp(-0.5 * sq / lengthscale ** 2)
+    return torch.exp(-0.5 * sq / lengthscale**2)
 
 
 @pytest.fixture
@@ -34,7 +34,10 @@ def test_kl_nonnegative(data):
     p = oracle_posterior(rbf, X_train, y_train, X_test, noise_var=0.01)
     q = oracle_posterior(
         lambda a, b: rbf(a, b, lengthscale=2.0),
-        X_train, y_train, X_test, noise_var=0.01,
+        X_train,
+        y_train,
+        X_test,
+        noise_var=0.01,
     )
     kl = kl_posterior(p, q)
     assert torch.isfinite(kl)
@@ -61,9 +64,13 @@ class TestPerModelMLLAndNoise:
 
     def test_mll_finite_for_all_models(self, fitted_models):
         for name, m in fitted_models.items():
-            assert math.isfinite(marginal_log_likelihood(m)), f"MLL not finite for {name}"
+            assert math.isfinite(
+                marginal_log_likelihood(m)
+            ), f"MLL not finite for {name}"
 
     def test_noise_var_positive_for_all_models(self, fitted_models):
         for name, m in fitted_models.items():
             nv = noise_variance(m)
-            assert nv > 0 and math.isfinite(nv), f"noise variance invalid for {name}: {nv}"
+            assert nv > 0 and math.isfinite(
+                nv
+            ), f"noise variance invalid for {name}: {nv}"

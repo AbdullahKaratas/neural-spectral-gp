@@ -54,10 +54,10 @@ def run_single_comparison(
     error_sdn = torch.norm(K_sdn - K_true_test) / torch.norm(K_true_test)
 
     return {
-        'seed': seed,
-        'error_gp': error_gp.item(),
-        'error_sdn': error_sdn.item(),
-        'improvement': (error_gp.item() - error_sdn.item()) / error_gp.item()
+        "seed": seed,
+        "error_gp": error_gp.item(),
+        "error_sdn": error_sdn.item(),
+        "improvement": (error_gp.item() - error_sdn.item()) / error_gp.item(),
     }
 
 
@@ -81,11 +81,11 @@ def main(n_seeds=10):
     # Compute 95 % confidence intervals
     n = len(df)
     alpha = 0.05
-    t_crit = stats.t.ppf(1 - alpha/2, n - 1)
+    t_crit = stats.t.ppf(1 - alpha / 2, n - 1)
 
     # RBF GP statistics
-    mean_gp = df['error_gp'].mean()
-    std_gp = df['error_gp'].std(ddof=1)
+    mean_gp = df["error_gp"].mean()
+    std_gp = df["error_gp"].std(ddof=1)
     ci_gp = t_crit * std_gp / np.sqrt(n)
 
     print("RBF:")
@@ -93,11 +93,11 @@ def main(n_seeds=10):
     print(f"+- {ci_gp*100:.2f} %")
 
     # F-SDN statistics
-    mean_sdn = df['error_sdn'].mean()
-    std_sdn = df['error_sdn'].std(ddof=1)
+    mean_sdn = df["error_sdn"].mean()
+    std_sdn = df["error_sdn"].std(ddof=1)
     ci_sdn = t_crit * std_sdn / np.sqrt(n)
 
-    print(f"F-SDN (Ours):")
+    print("F-SDN (Ours):")
     print(f"Mean Error: {mean_sdn*100:.2f} %")
     print(f"+- {ci_sdn*100:.2f} %")
 

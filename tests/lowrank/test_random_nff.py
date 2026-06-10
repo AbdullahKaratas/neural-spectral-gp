@@ -47,7 +47,9 @@ def test_kernel_converges():
     a = 1.0
     x = torch.linspace(0, 2, 30).unsqueeze(-1)
     xx, yy = x, x.T
-    K_sym = 0.5 * torch.exp(-a * (xx**2 + yy**2)) + 0.5 * torch.exp(-a * (xx - yy) ** 2)
+    K_sym = 0.5 * torch.exp(-a * (xx**2 + yy**2)) + 0.5 * torch.exp(
+        -a * (xx - yy) ** 2
+    )
 
     K_sum = torch.zeros_like(K_sym)
     for seed in range(50):

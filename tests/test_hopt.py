@@ -30,20 +30,30 @@ def _factory(cls):
         if cls is FactorizedSpectralDensityNetwork:
             return cls(input_dim=1, hidden_dims=[h, h], rank=2)
         return cls(input_dim=1, hidden_dims=[h, h])
+
     return make
 
 
-@pytest.mark.parametrize("cls, metric", [
-    (DKLGP, "mll"),
-    (NeuralGSMGP, "nlpd"),
-    (FactorizedSpectralDensityNetwork, "mll"),
-])
+@pytest.mark.parametrize(
+    "cls, metric",
+    [
+        (DKLGP, "mll"),
+        (NeuralGSMGP, "nlpd"),
+        (FactorizedSpectralDensityNetwork, "mll"),
+    ],
+)
 def test_optimize_across_models(data, cls, metric):
     X, y, Xv, yv = data
     val = () if metric == "mll" else (Xv, yv)
     study = optimize_hyperparameters(
-        _factory(cls), X, y, *val,
-        n_trials=2, fit_kwargs=dict(epochs=3), metric=metric, seed=0,
+        _factory(cls),
+        X,
+        y,
+        *val,
+        n_trials=2,
+        fit_kwargs=dict(epochs=3),
+        metric=metric,
+        seed=0,
         show_progress_bar=False,
     )
     assert math.isfinite(study.best_value)

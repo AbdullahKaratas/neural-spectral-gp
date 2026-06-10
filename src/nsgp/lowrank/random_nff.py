@@ -48,9 +48,7 @@ class RandomNonstationaryFeatures:
 
         gen = torch.Generator().manual_seed(seed)
         try:
-            self.omega1, self.omega2 = self.spectral_sampler(
-                self.n_feat, generator=gen
-            )
+            self.omega1, self.omega2 = self.spectral_sampler(self.n_feat, generator=gen)
         except TypeError:
             prev_state = torch.random.get_rng_state()
             try:
@@ -75,7 +73,9 @@ class RandomNonstationaryFeatures:
         Phi : torch.Tensor, shape (n, 2m)
         """
         if self.omega1 is None:
-            raise RuntimeError("Frequencies not sampled yet. Call sample_frequencies() first.")
+            raise RuntimeError(
+                "Frequencies not sampled yet. Call sample_frequencies() first."
+            )
 
         if X.dim() == 1:
             X = X.unsqueeze(-1)

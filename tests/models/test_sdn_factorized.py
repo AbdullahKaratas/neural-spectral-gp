@@ -32,7 +32,8 @@ def test_fourier_embedding(ed):
     """Fourier embedding (Tancik et al., 2020) is off when embedding_dim=0
     and on otherwise."""
     model = FactorizedSpectralDensityNetwork(
-        input_dim=1, embedding_dim=ed,
+        input_dim=1,
+        embedding_dim=ed,
     )
     # B (the random projection) exists iff the embedding is on.
     assert hasattr(model, "B") == (ed > 0)

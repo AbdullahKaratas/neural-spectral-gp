@@ -33,7 +33,9 @@ class StandardGP:
         self.kernel = kernel
         self.model = None
 
-    def compute_covariance(self, X1: torch.Tensor, X2: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def compute_covariance(
+        self, X1: torch.Tensor, X2: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
         """
         Compute covariance matrix with optional noise.
         """
@@ -45,7 +47,15 @@ class StandardGP:
         with torch.no_grad():
             return self.model.covar_module(X1, X2).to_dense()
 
-    def fit(self, X_train: torch.Tensor, y_train: torch.Tensor, epochs: int = 100, lr: float = 0.1, patience: int = None, verbose: bool = True):
+    def fit(
+        self,
+        X_train: torch.Tensor,
+        y_train: torch.Tensor,
+        epochs: int = 100,
+        lr: float = 0.1,
+        patience: int = None,
+        verbose: bool = True,
+    ):
         """
         Optimize hyperparameters. Assumes zero-mean GP.
         """
@@ -59,7 +69,7 @@ class StandardGP:
         mll = gpytorch.mlls.ExactMarginalLogLikelihood(self.likelihood, self.model)
 
         # Early stopping and best state
-        best_loss = float('inf')
+        best_loss = float("inf")
         best_state = None
         patience_counter = 0
         if patience is None:
@@ -80,7 +90,9 @@ class StandardGP:
             # Early stopping and best state tracking
             if loss.item() < best_loss:
                 best_loss = loss.item()
-                best_state = {k: v.cpu().clone() for k, v in self.model.state_dict().items()}
+                best_state = {
+                    k: v.cpu().clone() for k, v in self.model.state_dict().items()
+                }
                 patience_counter = 0
             else:
                 patience_counter += 1
@@ -92,7 +104,10 @@ class StandardGP:
             # Early stopping
             if patience_counter >= patience:
                 if verbose:
-                    print(f"Early stopping at epoch {i} (no improvement for {patience} epochs)")
+                    print(
+                        f"Early stopping at epoch {i} "
+                        f"(no improvement for {patience} epochs)"
+                    )
                 break
 
         # Restore best model and store best loss
@@ -100,12 +115,12 @@ class StandardGP:
             self.model.load_state_dict(best_state)
             self.best_loss = best_loss
             if verbose:
-                print(f"Standard GP Optimization finished.")
+                print("Standard GP Optimization finished.")
                 print(f"  Best Loss: {best_loss:.4f}")
         else:
             self.best_loss = loss.item()
             if verbose:
-                print(f"Standard GP Optimization finished.")
+                print("Standard GP Optimization finished.")
                 print(f"  Final Loss: {loss.item():.4f}")
 
         return losses
@@ -138,7 +153,9 @@ class StandardGP:
             else:
                 return self.model(X_test)
 
-    def predict(self, X_test: torch.Tensor, predictive_dist=True) -> Tuple[torch.Tensor, torch.Tensor]:
+    def predict(
+        self, X_test: torch.Tensor, predictive_dist=True
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Posterior prediction using exact GP inference.
         """

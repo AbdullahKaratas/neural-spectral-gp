@@ -1,6 +1,5 @@
 from typing import List
 
-import numpy as np
 import torch
 import torch.nn as nn
 
@@ -51,7 +50,7 @@ class FeatureExtractor(nn.Module):
     def _init_weights(self) -> None:
         for m in self.net.modules():
             if isinstance(m, nn.Linear):
-                nn.init.kaiming_normal_(m.weight, mode='fan_in', nonlinearity='relu')
+                nn.init.kaiming_normal_(m.weight, mode="fan_in", nonlinearity="relu")
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
 

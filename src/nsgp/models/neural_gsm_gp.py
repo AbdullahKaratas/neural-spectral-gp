@@ -55,7 +55,9 @@ class NeuralGSMGP:
         self.model = None
         self.best_loss = None
 
-    def compute_covariance(self, X1: torch.Tensor, X2: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def compute_covariance(
+        self, X1: torch.Tensor, X2: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
         if self.model is None:
             raise RuntimeError("Model not fitted yet.")
         self.model.eval()
@@ -126,17 +128,25 @@ class NeuralGSMGP:
 
             if loss.item() < best_loss:
                 best_loss = loss.item()
-                best_state = {k: v.cpu().clone() for k, v in self.model.state_dict().items()}
+                best_state = {
+                    k: v.cpu().clone() for k, v in self.model.state_dict().items()
+                }
                 patience_counter = 0
             else:
                 patience_counter += 1
 
             if verbose and (epoch % 100 == 0 or epoch == epochs - 1):
-                print(f"Epoch {epoch:4d}/{epochs} | Loss: {loss.item():.4f} | Best: {best_loss:.4f}")
+                print(
+                    f"Epoch {epoch:4d}/{epochs} | Loss: {loss.item():.4f} | "
+                    f"Best: {best_loss:.4f}"
+                )
 
             if patience_counter >= patience:
                 if verbose:
-                    print(f"Early stopping at epoch {epoch} (no improvement for {patience} epochs)")
+                    print(
+                        f"Early stopping at epoch {epoch} "
+                        f"(no improvement for {patience} epochs)"
+                    )
                 break
 
         if best_state is not None:

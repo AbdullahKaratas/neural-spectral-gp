@@ -15,9 +15,7 @@ class RegularNonstationaryFeatures:
         self.spectral_real = spectral_real
         self.num_feat = num_feat
 
-    def matrix_decomposition(
-        self, matrix, jitter: float = 1e-8, cholesky_max: int = 3
-    ):
+    def matrix_decomposition(self, matrix, jitter: float = 1e-8, cholesky_max: int = 3):
         for i in range(cholesky_max):
             try:
                 matrix_root = torch.linalg.cholesky(
@@ -80,7 +78,12 @@ class RegularNonstationaryFeatures:
             return kernel_root
 
     def simulation(
-        self, x1: torch.Tensor, spacing: float = 1.0, n_samples: int = 1, seed=None, **kwargs
+        self,
+        x1: torch.Tensor,
+        spacing: float = 1.0,
+        n_samples: int = 1,
+        seed=None,
+        **kwargs,
     ):
         if seed is not None:
             torch.manual_seed(seed)

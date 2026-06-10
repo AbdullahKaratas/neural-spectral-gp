@@ -31,8 +31,7 @@ P = 1
 eta = torch.tensor([[1.0]])
 frequencies = torch.cat([eta, -eta], dim=0)
 
-B = torch.tensor(
-    [[2.0 + 0.0j, 0.0 + 0.5j], [0.0 - 0.5j, 2.0 + 0.0j]])
+B = torch.tensor([[2.0 + 0.0j, 0.0 + 0.5j], [0.0 - 0.5j, 2.0 + 0.0j]])
 
 # HMK kernel with specific parameters to match Silverman's kernel
 sigma1 = torch.eye(d) * (1.0 / (math.pi**2))
@@ -72,7 +71,9 @@ required_delta_omega = math.pi / x_max
 print(f"Aliasing satisfied: {delta_omega <= required_delta_omega}")
 
 # NFF approximation
-nff = RegularNonstationaryFeatures(spectral=hmk.s_khm, spectral_real=False, num_feat=num_feat)
+nff = RegularNonstationaryFeatures(
+    spectral=hmk.s_khm, spectral_real=False, num_feat=num_feat
+)
 k_estimate = nff.kernel_estimate(
     x_range.reshape(-1, 1), x_range.reshape(-1, 1), spacing=delta_omega
 )
@@ -206,9 +207,7 @@ ax.imshow(
 )
 ax.axis("off")
 plt.subplots_adjust(left=0, right=1, top=1, bottom=0)
-plt.savefig(
-    DATA_DIR / "hmk_k_estimate.png", dpi=dpi, bbox_inches="tight", pad_inches=0
-)
+plt.savefig(DATA_DIR / "hmk_k_estimate.png", dpi=dpi, bbox_inches="tight", pad_inches=0)
 plt.close()
 
 # Error
