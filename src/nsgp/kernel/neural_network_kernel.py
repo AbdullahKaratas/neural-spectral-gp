@@ -61,7 +61,7 @@ class NeuralNetworkKernel(Kernel):
         )
 
     def _augment(self, x: torch.Tensor) -> torch.Tensor:
-        """Prepend a constant 1 (bias) to the feature dimension."""
+        """Prepend a constant 1 to the feature."""
         ones = torch.ones(*x.shape[:-1], 1, dtype=x.dtype, device=x.device)
         return torch.cat([ones, x], dim=-1)
 
@@ -70,7 +70,6 @@ class NeuralNetworkKernel(Kernel):
         x1: torch.Tensor,
         x2: torch.Tensor,
         diag: bool = False,
-        **params,
     ) -> torch.Tensor:
         """
         Parameters
