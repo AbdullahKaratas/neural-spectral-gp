@@ -61,7 +61,7 @@ class RegularNonstationaryFeatures:
 
             matrix = self.spectral(omega, omega) * (spacing) ** 2
             matrix_root = self.matrix_decomposition(matrix, **kwargs).to(
-                torch.complex64
+                torch.promote_types(matrix.dtype, torch.complex64)
             )
             b1 = torch.cos(omega.reshape(1, -1) * x1.reshape(-1, 1))
             b2 = torch.sin(omega.reshape(1, -1) * x1.reshape(-1, 1))

@@ -29,6 +29,9 @@ class HarmonizableMixtureKernel:
         self.neg_log_det_L1 = -torch.sum(torch.log(torch.diag(self.L1)))
         self.neg_log_det_L2 = -torch.sum(torch.log(torch.diag(self.L2)))
 
+        # Complex dtype (complex64 <- float32, complex128 <- float64)
+        self._cdtype = torch.promote_types(self.L1.dtype, torch.complex64)
+
         self.num_components = len(centers)
         # x_p
         self.centers = centers
@@ -98,7 +101,7 @@ class HarmonizableMixtureKernel:
             x2 = x2.unsqueeze(-1)
 
         n1, n2 = x1.shape[0], x2.shape[0]
-        kernel = torch.zeros(n1, n2, dtype=torch.complex64, device=x1.device)
+        kernel = torch.zeros(n1, n2, dtype=self._cdtype, device=x1.device)
 
         for p in range(self.num_components):
             # Shift inputs
@@ -169,7 +172,7 @@ class HarmonizableMixtureKernel:
 
         # Initialize
         n1, n2 = omega1.shape[0], omega2.shape[0]
-        spectral_sum = torch.zeros(n1, n2, dtype=torch.complex64, device=omega1.device)
+        spectral_sum = torch.zeros(n1, n2, dtype=self._cdtype, device=omega1.device)
 
         # Sum over all pairs
         for i in range(Q_p):
@@ -196,7 +199,7 @@ class HarmonizableMixtureKernel:
 
         n1, n2 = omega1.shape[0], omega2.shape[0]
         spectral_density = torch.zeros(
-            n1, n2, dtype=torch.complex64, device=omega1.device
+            n1, n2, dtype=self._cdtype, device=omega1.device
         )
 
         omega_diff = omega1[:, None, :] - omega2[None, :, :]

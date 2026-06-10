@@ -32,8 +32,7 @@ eta = torch.tensor([[1.0]])
 frequencies = torch.cat([eta, -eta], dim=0)
 
 B = torch.tensor(
-    [[2.0 + 0.0j, 0.0 + 0.5j], [0.0 - 0.5j, 2.0 + 0.0j]], dtype=torch.complex64
-)
+    [[2.0 + 0.0j, 0.0 + 0.5j], [0.0 - 0.5j, 2.0 + 0.0j]])
 
 # HMK kernel with specific parameters to match Silverman's kernel
 sigma1 = torch.eye(d) * (1.0 / (math.pi**2))
