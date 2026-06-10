@@ -5,10 +5,10 @@ from typing import Optional, Tuple
 
 
 class ExactGPModel(gpytorch.models.ExactGP):
-    def __init__(self, train_x, train_y, likelihood):
+    def __init__(self, train_x, train_y, likelihood, kernel):
         super(ExactGPModel, self).__init__(train_x, train_y, likelihood)
         self.mean_module = gpytorch.means.ZeroMean()
-        self.covar_module = gpytorch.kernels.ScaleKernel(gpytorch.kernels.RBFKernel())
+        self.covar_module = kernel
 
     def forward(self, x):
         mean_x = self.mean_module(x)
@@ -18,11 +18,19 @@ class ExactGPModel(gpytorch.models.ExactGP):
 
 class StandardGP:
     """
-    Standard Stationary Gaussian Process.
+    Standard Gaussian Process.
+
+    Parameters
+    ----------
+    kernel : gpytorch.kernels.Kernel, optional
+        Defaults to ScaleKernel(RBFKernel()).
     """
-    
-    def __init__(self):
+
+    def __init__(self, kernel=None):
         self.likelihood = gpytorch.likelihoods.GaussianLikelihood()
+        if kernel is None:
+            kernel = gpytorch.kernels.ScaleKernel(gpytorch.kernels.RBFKernel())
+        self.kernel = kernel
         self.model = None
 
     def compute_covariance(self, X1: torch.Tensor, X2: Optional[torch.Tensor] = None) -> torch.Tensor:
@@ -42,7 +50,7 @@ class StandardGP:
         Optimize hyperparameters. Assumes zero-mean GP.
         """
 
-        self.model = ExactGPModel(X_train, y_train, self.likelihood)
+        self.model = ExactGPModel(X_train, y_train, self.likelihood, self.kernel)
         self.model.train()
         self.likelihood.train()
 
