@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-# Modifications: Copyright 2026 Arsalan Jawaid (MIT-licensed)
+# Modifications: Copyright 2026 Arsalan Jawaid (MIT License)
 
 
 import math
@@ -146,7 +146,6 @@ results["RBF"] = gap_metrics(gp, test_y)
 #
 
 # (c) F-SDN (ours)
-# omega_max: low / underfitting, high / overfitting
 omega_max = 32.0
 # compute n_features
 xmax = train_x.abs().max()
@@ -164,7 +163,7 @@ fsdn = FactorizedSpectralDensityNetwork(
     spectral_real=False,
     prior_variance=1.0,
     embedding_dim=256,
-    embedding_scale=15.0,
+    embedding_scale=15.0,  # low/underfitting, high/overfitting
 )
 with torch.no_grad():
     fsdn.log_noise_var.data = torch.tensor(math.log(1**2))
