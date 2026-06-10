@@ -70,6 +70,7 @@ class NeuralNetworkKernel(Kernel):
         x1: torch.Tensor,
         x2: torch.Tensor,
         diag: bool = False,
+        **params,
     ) -> torch.Tensor:
         """
         Parameters
