@@ -32,7 +32,8 @@ torch.set_default_dtype(torch.float64)
 torch.manual_seed(67)
 
 
-DATA_DIR = Path("experiments/kernel_learning/data")
+DATA_DIR = Path(__file__).parent / "data"
+DATA_DIR.mkdir(exist_ok=True)
 data = pd.read_csv(
     DATA_DIR / "solar_data.txt", comment="#", sep=",", header=None
 ).to_numpy()
