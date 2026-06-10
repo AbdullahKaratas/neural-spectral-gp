@@ -1,7 +1,6 @@
 import math
 import torch
 import numpy as np
-import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
@@ -47,7 +46,9 @@ if __name__ == "__main__":
 
     # Symmetrized kernel (irreducible bias floor for random NFF)
     xx, yy = x, x.T
-    K_sym = 0.5 * torch.exp(-a * (xx**2 + yy**2)) + 0.5 * torch.exp(-a * (xx - yy) ** 2)
+    K_sym = 0.5 * torch.exp(-a * (xx**2 + yy**2)) + 0.5 * torch.exp(
+        -a * (xx - yy) ** 2
+    )
     err_sym = relative_error(K_sym, K_true)
 
     # Regular NFF
@@ -70,14 +71,13 @@ if __name__ == "__main__":
 
     results = []
 
-    sampler = lambda n_feat, a=a: silverman_sampler(n_feat, a=a)
+    def sampler(n_feat, a=a):
+        return silverman_sampler(n_feat, a=a)
 
     for m in mc_features_list:
         errors = []
         for seed in range(n_seeds):
-            rnff = RandomNonstationaryFeatures(
-                spectral_sampler=sampler, n_feat=m
-            )
+            rnff = RandomNonstationaryFeatures(spectral_sampler=sampler, n_feat=m)
             rnff.sample_frequencies(seed=seed)
 
             with torch.no_grad():
@@ -88,26 +88,31 @@ if __name__ == "__main__":
 
         mean_err = np.mean(errors)
         std_err = np.std(errors, ddof=1)
-        results.append({
-            "n_features": m,
-            "mean_error": mean_err,
-            "std_error": std_err,
-            "errors": errors,
-        })
-        print(f"Random NFF (m={m:4d}): {mean_err:.4f} +/- {2.0 * std_err/np.sqrt(n_seeds):.4f}")
+        results.append(
+            {
+                "n_features": m,
+                "mean_error": mean_err,
+                "std_error": std_err,
+                "errors": errors,
+            }
+        )
+        ci = 2.0 * std_err / np.sqrt(n_seeds)
+        print(f"Random NFF (m={m:4d}): {mean_err:.4f} +/- {ci:.4f}")
 
     # Plot: convergence of Random NFF vs Regular NFF baseline
     fig, ax = plt.subplots(figsize=(8, 5))
 
     mc_m = [r["n_features"] for r in results]
     mc_mean = [r["mean_error"] for r in results]
-    mc_std = [2.0 * r["std_error"]/np.sqrt(n_seeds) for r in results]
+    mc_std = [2.0 * r["std_error"] / np.sqrt(n_seeds) for r in results]
 
     ax.errorbar(mc_m, mc_mean, yerr=mc_std, fmt="o-", label="Random NFF")
-    ax.axhline(y=err_sym, color="gray", linestyle=":",
-               label="Symmetrization bias floor")
-    ax.axhline(y=err_nff, color="r", linestyle="--",
-               label=f"Regular NFF (m={num_feat_nff})")
+    ax.axhline(
+        y=err_sym, color="gray", linestyle=":", label="Symmetrization bias floor"
+    )
+    ax.axhline(
+        y=err_nff, color="r", linestyle="--", label=f"Regular NFF (m={num_feat_nff})"
+    )
 
     ax.set_xscale("log")
     ax.set_xlabel("Number of features")
@@ -132,14 +137,23 @@ if __name__ == "__main__":
     cmap = sns.cubehelix_palette(n_colors=N, as_cmap=True, reverse=True)
 
     fig, axes = plt.subplots(1, 3, figsize=(15, 4.5))
-    for ax, K, title in zip(axes, [K_true, K_nff, K_mc_largest], [
-        "True Kernel",
-        f"Regular NFF (m={num_feat_nff})",
-        f"Random NFF (m={largest_m})",
-    ]):
+    for ax, K, title in zip(
+        axes,
+        [K_true, K_nff, K_mc_largest],
+        [
+            "True Kernel",
+            f"Regular NFF (m={num_feat_nff})",
+            f"Random NFF (m={largest_m})",
+        ],
+    ):
         ax.imshow(
-            K.numpy(), origin="lower", cmap=cmap,
-            vmin=0, vmax=1, extent=[0, x_max, 0, x_max], aspect="auto",
+            K.numpy(),
+            origin="lower",
+            cmap=cmap,
+            vmin=0,
+            vmax=1,
+            extent=[0, x_max, 0, x_max],
+            aspect="auto",
         )
         ax.set_title(title)
 

@@ -7,7 +7,11 @@ import gpytorch
 import numpy as np
 from typing import Optional, List
 
-from linear_operator.operators import DenseLinearOperator, DiagLinearOperator, LowRankRootLinearOperator
+from linear_operator.operators import (
+    DenseLinearOperator,
+    DiagLinearOperator,
+    LowRankRootLinearOperator,
+)
 
 
 class FactorizedSpectralDensityNetwork(nn.Module):
@@ -48,7 +52,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         rank: int = 10,
         n_features: int = 50,
         omega_max: float = 8.0,
-        activation: str = 'relu',
+        activation: str = "relu",
         enforce_symmetry: bool = False,
         spectral_real: bool = True,
         learn_log_scale: bool = True,
@@ -79,7 +83,9 @@ class FactorizedSpectralDensityNetwork(nn.Module):
             spacing = omega_max / self.n_features
             self.register_buffer(
                 "omega_grid",
-                torch.arange(0, self.n_features).reshape(-1, 1).to(torch.get_default_dtype())
+                torch.arange(0, self.n_features)
+                .reshape(-1, 1)
+                .to(torch.get_default_dtype())
                 * spacing,
             )
         else:
@@ -93,14 +99,12 @@ class FactorizedSpectralDensityNetwork(nn.Module):
             self.n_features = 2 * k - 1
 
         # Learnable global scale (log variance)
-        # Initialize to 0.0 for unit signal variance (exp(0) = 1.0) when targets are standardized
+        # Initialize to 0.0 for unit signal variance (exp(0) = 1.0)
+        # when targets are standardized
         if learn_log_scale:
             self.log_scale = nn.Parameter(torch.tensor(0.0))
         else:
-            self.register_buffer(
-                "log_scale",
-                torch.tensor(0.0)
-            )
+            self.register_buffer("log_scale", torch.tensor(0.0))
 
         # Learnable noise variance (log scale for numerical stability)
         # Initialize to log(0.5^2) for noise_std = 0.5
@@ -117,7 +121,9 @@ class FactorizedSpectralDensityNetwork(nn.Module):
             mlp_input_dim = input_dim
 
         output_dim = rank if spectral_real else 2 * rank
-        self.feature_net = self._build_mlp(mlp_input_dim, output_dim, hidden_dims, activation)
+        self.feature_net = self._build_mlp(
+            mlp_input_dim, output_dim, hidden_dims, activation
+        )
         self.best_loss = None
         self.X_train = None
         self.y_train = None
@@ -126,11 +132,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         self._init_weights()
 
     def _build_mlp(
-        self,
-        input_dim: int,
-        output_dim: int,
-        hidden_dims: List[int],
-        activation: str
+        self, input_dim: int, output_dim: int, hidden_dims: List[int], activation: str
     ) -> nn.Sequential:
         """Build an MLP network."""
         layers = []
@@ -152,9 +154,13 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         for m in self.modules():
             if isinstance(m, nn.Linear):
                 if act in ("relu", "elu"):
-                    nn.init.kaiming_normal_(m.weight, mode="fan_in", nonlinearity="relu")
+                    nn.init.kaiming_normal_(
+                        m.weight, mode="fan_in", nonlinearity="relu"
+                    )
                 elif act == "tanh":
-                    nn.init.xavier_uniform_(m.weight, gain=nn.init.calculate_gain("tanh"))
+                    nn.init.xavier_uniform_(
+                        m.weight, gain=nn.init.calculate_gain("tanh")
+                    )
                 else:
                     nn.init.xavier_uniform_(m.weight, gain=1.0)
                 if m.bias is not None:
@@ -167,14 +173,20 @@ class FactorizedSpectralDensityNetwork(nn.Module):
     def _get_activation(self, activation: str) -> nn.Module:
         """Get activation function."""
         return {
-            'relu': nn.ReLU(),
-            'elu': nn.ELU(),
-            'tanh': nn.Tanh(),
+            "relu": nn.ReLU(),
+            "elu": nn.ELU(),
+            "tanh": nn.Tanh(),
         }.get(activation, nn.ELU())
 
     def log_prior(self) -> torch.Tensor:
         """Gaussian prior on NN weights: log p(W) = -0.5/prior_variance * ||W||^2."""
-        weights = torch.cat([p.view(-1) for name, p in self.feature_net.named_parameters() if "weight" in name])
+        weights = torch.cat(
+            [
+                p.view(-1)
+                for name, p in self.feature_net.named_parameters()
+                if "weight" in name
+            ]
+        )
         return -0.5 * weights.norm().pow(2) / self.prior_variance
 
     def _embed(self, omega: torch.Tensor) -> torch.Tensor:
@@ -183,7 +195,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         if self.embedding_dim > 0:
             proj = (omega / self.omega_max) @ self.B
             return torch.cat([torch.sin(proj), torch.cos(proj)], dim=-1)
-        return omega/self.omega_max
+        return omega / self.omega_max
 
     def compute_features(self, omega: torch.Tensor) -> torch.Tensor:
         r"""
@@ -207,7 +219,10 @@ class FactorizedSpectralDensityNetwork(nn.Module):
 
         if self.enforce_symmetry:
             # Symmetrize: f(omega) = [tilde{f}(omega) + tilde{f}(-omega)] / 2
-            f = (self.feature_net(self._embed(omega)) + self.feature_net(self._embed(-omega))) / 2.0
+            f = (
+                self.feature_net(self._embed(omega))
+                + self.feature_net(self._embed(-omega))
+            ) / 2.0
         else:
             f = self.feature_net(self._embed(omega))
 
@@ -239,13 +254,17 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         """
         # Input validation
         if X.shape[1] != 1:
-            raise NotImplementedError("compute_lowrank_features only supports 1D inputs (X.shape[1] == 1).")
+            raise NotImplementedError(
+                "compute_lowrank_features only supports 1D inputs (X.shape[1] == 1)."
+            )
 
         if not torch.is_floating_point(X):
             raise TypeError(f"X must be floating point tensor, got {X.dtype}")
 
         if not torch.is_floating_point(self.omega_grid):
-            raise TypeError(f"omega_grid must be floating point tensor, got {self.omega_grid.dtype}")
+            raise TypeError(
+                f"omega_grid must be floating point tensor, got {self.omega_grid.dtype}"
+            )
 
         num_freqs = self.omega_grid.shape[0]
         n_pts = X.shape[0]
@@ -253,14 +272,16 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         # Validate minimum requirements
         if num_freqs < 2:
             raise ValueError(
-                f"Frequency grid must contain at least 2 points, got {num_freqs}. "
-                "Low-rank approximation requires multiple frequency samples to compute spacing."
+                f"Frequency grid must contain at least 2 points, "
+                f"got {num_freqs}. Low-rank approximation requires "
+                f"multiple frequency samples to compute spacing."
             )
 
         if n_pts < 2:
             raise ValueError(
-                f"Spatial locations X must contain at least 2 points, got {n_pts}. "
-                "Low-rank approximation requires multiple spatial points to compute spacing."
+                f"Spatial locations X must contain at least 2 points, "
+                f"got {n_pts}. Low-rank approximation requires multiple "
+                f"spatial points to compute spacing."
             )
 
         # Compute minimal spacing: \Delta x = min_j(x_{j+1} - x_j)
@@ -274,14 +295,19 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         constraint_rhs = n_pts * delta_x
 
         if constraint_lhs < constraint_rhs:
+            rec = (
+                int(np.ceil(self.omega_grid.max().item() / (np.pi / constraint_rhs)))
+                + 1
+            )
             warnings.warn(
-                f"Frequency grid may be too coarse: pi/spacing = {constraint_lhs:.4f} < n*delta_x = {constraint_rhs:.4f}. "
-                f"Consider using at least {int(np.ceil(self.omega_grid.max().item() / (np.pi / constraint_rhs)))+1} frequency points."
+                f"Frequency grid may be too coarse: pi/spacing = "
+                f"{constraint_lhs:.4f} < n*delta_x = {constraint_rhs:.4f}. "
+                f"Consider using at least {rec} frequency points."
             )
 
         # Compute low rank features
         # Paper: [F]_{kj} = conj(f_j(omega_k)); no-op when spectral_real=True
-        F_pos = self.compute_features(self.omega_grid).conj()   # (num_freqs, r)
+        F_pos = self.compute_features(self.omega_grid).conj()  # (num_freqs, r)
         if not self.enforce_symmetry:
             F_neg = self.compute_features(-self.omega_grid)  # (num_freqs, r)
 
@@ -312,15 +338,21 @@ class FactorizedSpectralDensityNetwork(nn.Module):
                     [psi_real, psi_imag, psi_neg_real, psi_neg_imag], dim=-1
                 )
         else:
-            psi_real = torch.cat([
-                B_cos @ F_pos.real - B_sin @ F_pos.imag,
-                B_cos @ F_neg.real - B_sin @ F_neg.imag,
-            ], dim=-1)
-            psi_imag = torch.cat([
-                B_cos @ F_pos.imag + B_sin @ F_pos.real,
-                B_cos @ F_neg.imag + B_sin @ F_neg.real,
-            ], dim=-1)
-            
+            psi_real = torch.cat(
+                [
+                    B_cos @ F_pos.real - B_sin @ F_pos.imag,
+                    B_cos @ F_neg.real - B_sin @ F_neg.imag,
+                ],
+                dim=-1,
+            )
+            psi_imag = torch.cat(
+                [
+                    B_cos @ F_pos.imag + B_sin @ F_pos.real,
+                    B_cos @ F_neg.imag + B_sin @ F_neg.real,
+                ],
+                dim=-1,
+            )
+
             L = math.sqrt(2.0) * torch.cat([psi_real, psi_imag], dim=-1) * spacing
 
         # Apply learnable scale: L_scaled = sqrt(theta) * L
@@ -329,10 +361,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         return L
 
     def log_marginal_likelihood(
-        self,
-        L: torch.Tensor,
-        y: torch.Tensor,
-        sigma2: torch.Tensor
+        self, L: torch.Tensor, y: torch.Tensor, sigma2: torch.Tensor
     ) -> torch.Tensor:
         r"""
         Compute negative marginal likelihood using low-rank NFF approximation.
@@ -371,20 +400,30 @@ class FactorizedSpectralDensityNetwork(nn.Module):
             )
 
         if y.shape[0] != n:
-            raise ValueError(f"Shape mismatch: L has {n} rows but y has {y.shape[0]} elements")
+            raise ValueError(
+                f"Shape mismatch: L has {n} rows but y has {y.shape[0]} elements"
+            )
 
         if L.device != y.device:
-            raise ValueError(f"L and y must be on same device, got L on {L.device} and y on {y.device}")
+            raise ValueError(
+                f"L and y must be on same device, got L on {L.device} "
+                f"and y on {y.device}"
+            )
 
         if r > n:
             warnings.warn(
                 f"Rank r={r} exceeds number of data points n={n}. "
-                f"Low-rank approximation is inefficient in this regime. Consider r <= n."
+                f"Low-rank approximation is inefficient in this regime. "
+                f"Consider r <= n."
             )
 
         # Woodbury and log determinant formula with linear_operator
-        covar = LowRankRootLinearOperator(L) + DiagLinearOperator(sigma2 * torch.ones(n, device=L.device, dtype=L.dtype))
-        data_fit, log_det = covar.inv_quad_logdet(inv_quad_rhs=y.unsqueeze(-1), logdet=True)
+        covar = LowRankRootLinearOperator(L) + DiagLinearOperator(
+            sigma2 * torch.ones(n, device=L.device, dtype=L.dtype)
+        )
+        data_fit, log_det = covar.inv_quad_logdet(
+            inv_quad_rhs=y.unsqueeze(-1), logdet=True
+        )
 
         # Negative log marginal likelihood
         nll = 0.5 * (data_fit + log_det + n * math.log(2.0 * math.pi))
@@ -417,7 +456,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         epochs: int = 500,
         lr: float = 1e-2,
         patience: Optional[int] = None,
-        verbose: bool = True
+        verbose: bool = True,
     ) -> List[float]:
         """
         Train the factorized SDN using low-rank NFF approximation.
@@ -449,7 +488,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         optimizer = torch.optim.Adam(self.parameters(), lr=lr, amsgrad=True)
 
         # Early stopping and best state
-        best_loss = float('inf')
+        best_loss = float("inf")
         best_state = None
         patience_counter = 0
         if patience is None:
@@ -492,7 +531,7 @@ class FactorizedSpectralDensityNetwork(nn.Module):
 
             # Track
             losses.append(loss.item())
-            current_lr = optimizer.param_groups[0]['lr']
+            optimizer.param_groups[0]["lr"]
 
             # Early stopping and best state tracking
             if loss.item() < best_loss:
@@ -504,14 +543,18 @@ class FactorizedSpectralDensityNetwork(nn.Module):
 
             # Print progress
             if verbose and (epoch % 100 == 0 or epoch == epochs - 1):
-                print(f"Epoch {epoch:4d}/{epochs} | Loss: {loss.item():.4f} | "
-                      f"Best: {best_loss:.4f}")
+                print(
+                    f"Epoch {epoch:4d}/{epochs} | Loss: {loss.item():.4f} | "
+                    f"Best: {best_loss:.4f}"
+                )
 
             # Early stopping
             if patience_counter >= patience:
                 if verbose:
-                    print(f"Early stopping at epoch {epoch} "
-                          f"(no improvement for {patience} epochs)")
+                    print(
+                        f"Early stopping at epoch {epoch} "
+                        f"(no improvement for {patience} epochs)"
+                    )
                 break
 
         # Restore best model and store best loss
@@ -549,15 +592,16 @@ class FactorizedSpectralDensityNetwork(nn.Module):
         """
         if self.X_train is None:
             raise RuntimeError("Model not fitted yet.")
-        
-        with torch.no_grad():
 
+        with torch.no_grad():
             noise = torch.exp(self.log_noise_var)
 
             L = self.compute_lowrank_features(self.X_train)
             _, rank_4r = L.shape
 
-            M = DenseLinearOperator(L.mT @ L) + DiagLinearOperator(noise * torch.ones(rank_4r, dtype=L.dtype, device=L.device))
+            M = DenseLinearOperator(L.mT @ L) + DiagLinearOperator(
+                noise * torch.ones(rank_4r, dtype=L.dtype, device=L.device)
+            )
             L_star = self.compute_lowrank_features(X_test)
 
             # Posterior mean
@@ -569,11 +613,15 @@ class FactorizedSpectralDensityNetwork(nn.Module):
                 var = noise * (L_star * M.solve(L_star.mT).mT).sum(dim=1)
                 if predictive_dist:
                     var = var + noise
-                return gpytorch.distributions.MultivariateNormal(mean, DiagLinearOperator(var))
+                return gpytorch.distributions.MultivariateNormal(
+                    mean, DiagLinearOperator(var)
+                )
             else:
                 covar = noise * (L_star @ M.solve(L_star.mT))
                 if predictive_dist:
-                    covar = covar + noise * torch.eye(L_star.shape[0], dtype=L_star.dtype, device=L_star.device)
+                    covar = covar + noise * torch.eye(
+                        L_star.shape[0], dtype=L_star.dtype, device=L_star.device
+                    )
                 return gpytorch.distributions.MultivariateNormal(mean, covar)
 
     def predict(self, X_test, predictive_dist=True):

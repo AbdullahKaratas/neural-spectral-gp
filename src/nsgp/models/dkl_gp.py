@@ -10,8 +10,10 @@ class ExactDKLGP(gpytorch.models.ExactGP):
         super().__init__(train_x, train_y, likelihood)
         self.feature_extractor = feature_extractor
         self.mean_module = gpytorch.means.ZeroMean()
-        self.covar_module = gpytorch.kernels.ScaleKernel(gpytorch.kernels.RBFKernel(ard_num_dims=feature_extractor.output_dim))
-        self.scale_to_bounds = gpytorch.utils.grid.ScaleToBounds(-1., 1.)
+        self.covar_module = gpytorch.kernels.ScaleKernel(
+            gpytorch.kernels.RBFKernel(ard_num_dims=feature_extractor.output_dim)
+        )
+        self.scale_to_bounds = gpytorch.utils.grid.ScaleToBounds(-1.0, 1.0)
 
     def forward(self, x):
         projected_x = self.feature_extractor(x)
@@ -36,26 +38,26 @@ class DKLGP:
     hidden_dims : list of int
         Sizes of hidden layers. Empty list gives a single linear map.
     """
-    
+
     def __init__(
         self,
         input_dim: int = 1,
         output_dim: int = 2,
         hidden_dims: List[int] = [1000, 500, 50],
-        ):
+    ):
         self.input_dim = input_dim
         self.output_dim = output_dim
         self.hidden_dims = hidden_dims
         self.likelihood = gpytorch.likelihoods.GaussianLikelihood()
         self.feature_extractor = FeatureExtractor(
-            input_dim=input_dim,
-            output_dim=output_dim,
-            hidden_dims=hidden_dims
+            input_dim=input_dim, output_dim=output_dim, hidden_dims=hidden_dims
         )
         self.model = None
         self.best_loss = None
 
-    def compute_covariance(self, X1: torch.Tensor, X2: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def compute_covariance(
+        self, X1: torch.Tensor, X2: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
         """
         Compute the DKL covariance matrix k(x, x') = k_RBF(s(phi(x)), s(phi(x'))),
         where phi is the feature extractor and s is `ScaleToBounds`.
@@ -73,12 +75,21 @@ class DKLGP:
                 phi2 = self.model.scale_to_bounds(self.model.feature_extractor(X2))
             return self.model.covar_module(phi1, phi2).to_dense()
 
-
-    def fit(self, X_train: torch.Tensor, y_train: torch.Tensor, epochs: int = 100, lr: float = 0.1, patience: int = None, verbose: bool = True):
+    def fit(
+        self,
+        X_train: torch.Tensor,
+        y_train: torch.Tensor,
+        epochs: int = 100,
+        lr: float = 0.1,
+        patience: int = None,
+        verbose: bool = True,
+    ):
         """
         Optimize hyperparameters. Assumes zero-mean GP.
         """
-        self.model = ExactDKLGP(X_train, y_train, self.likelihood, self.feature_extractor)
+        self.model = ExactDKLGP(
+            X_train, y_train, self.likelihood, self.feature_extractor
+        )
         self.model.train()
         self.likelihood.train()
 
@@ -96,7 +107,7 @@ class DKLGP:
 
         if verbose:
             n_params = sum(p.numel() for p in self.model.parameters())
-            print(f"TRAINING DKL:")
+            print("TRAINING DKL:")
             print(f"  Parameters: {n_params:,}")
             print(f"  Hidden dims: {self.hidden_dims}")
             print(f"  Epochs: {epochs}")
@@ -120,17 +131,25 @@ class DKLGP:
 
             if loss.item() < best_loss:
                 best_loss = loss.item()
-                best_state = {k: v.cpu().clone() for k, v in self.model.state_dict().items()}
+                best_state = {
+                    k: v.cpu().clone() for k, v in self.model.state_dict().items()
+                }
                 patience_counter = 0
             else:
                 patience_counter += 1
 
             if verbose and (epoch % 100 == 0 or epoch == epochs - 1):
-                print(f"Epoch {epoch:4d}/{epochs} | Loss: {loss.item():.4f} | Best: {best_loss:.4f}")
+                print(
+                    f"Epoch {epoch:4d}/{epochs} | Loss: {loss.item():.4f} | "
+                    f"Best: {best_loss:.4f}"
+                )
 
             if patience_counter >= patience:
                 if verbose:
-                    print(f"Early stopping at epoch {epoch} (no improvement for {patience} epochs)")
+                    print(
+                        f"Early stopping at epoch {epoch} "
+                        f"(no improvement for {patience} epochs)"
+                    )
                 break
 
         if best_state is not None:

@@ -39,8 +39,7 @@ def sq_exp(x1, x2, dist=True):
     return res.clamp_min_(0)
 
 
-def _objective_value(model, metric, X_val = None, y_val = None) -> float:
-
+def _objective_value(model, metric, X_val=None, y_val=None) -> float:
     _aliases = {
         "nlpd": "negative_log_predictive_density",
         "mse": "mean_squared_error",
@@ -55,9 +54,11 @@ def _objective_value(model, metric, X_val = None, y_val = None) -> float:
     # minimize -mll
     if name == "marginal_log_likelihood":
         from nsgp.metrics import marginal_log_likelihood
+
         return -marginal_log_likelihood(model)
 
     import gpytorch.metrics as gpytorch_metrics
+
     fn = getattr(gpytorch_metrics, name, None)
     if fn is None:
         raise ValueError(f"Unknown metric '{metric}'.")
@@ -134,10 +135,7 @@ def optimize_hyperparameters(
 
         return value if math.isfinite(value) else float("inf")
 
-    study = optuna.create_study(
-        direction="minimize",
-        **kwargs
-    )
+    study = optuna.create_study(direction="minimize", **kwargs)
     study.optimize(objective, n_trials=n_trials, show_progress_bar=show_progress_bar)
     return study
 
@@ -147,4 +145,5 @@ def build_model(model_fn: Callable, params: dict):
     Build a model from a parameter dict.
     """
     import optuna
+
     return model_fn(optuna.trial.FixedTrial(params))

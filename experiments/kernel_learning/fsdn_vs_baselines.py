@@ -41,6 +41,7 @@ METRIC_KEYS = ["k_error", "nlpd", "mae", "mse", "kl", "mll", "noise_var"]
 @dataclass
 class MethodSpec:
     """A method to evaluate. ``factory`` returns a fresh model on each call."""
+
     label: str
     factory: Callable[[], object]
 
@@ -48,21 +49,49 @@ class MethodSpec:
 def make_methods(include_complex: bool = True) -> List[MethodSpec]:
     methods = [
         MethodSpec("RBF", lambda: StandardGP()),
-        MethodSpec("NNK", lambda: StandardGP(ScaleKernel(NeuralNetworkKernel(aug_dim=2)))),
-        MethodSpec("Neural-GSM", lambda: NeuralGSMGP(
-            input_dim=1, n_components=2, hidden_dims=[128, 128], prior_variance=1.0,
-        )),
+        MethodSpec(
+            "NNK", lambda: StandardGP(ScaleKernel(NeuralNetworkKernel(aug_dim=2)))
+        ),
+        MethodSpec(
+            "Neural-GSM",
+            lambda: NeuralGSMGP(
+                input_dim=1,
+                n_components=2,
+                hidden_dims=[128, 128],
+                prior_variance=1.0,
+            ),
+        ),
         MethodSpec("DKL", lambda: DKLGP(input_dim=1, hidden_dims=[128, 128])),
-        MethodSpec("F-SDN (real)", lambda: FactorizedSpectralDensityNetwork(
-            input_dim=1, hidden_dims=[128, 128], rank=8, n_features=256,
-            omega_max=10.0, enforce_symmetry=False, spectral_real=True, prior_variance=1.0
-        )),
+        MethodSpec(
+            "F-SDN (real)",
+            lambda: FactorizedSpectralDensityNetwork(
+                input_dim=1,
+                hidden_dims=[128, 128],
+                rank=8,
+                n_features=256,
+                omega_max=10.0,
+                enforce_symmetry=False,
+                spectral_real=True,
+                prior_variance=1.0,
+            ),
+        ),
     ]
     if include_complex:
-        methods.append(MethodSpec("F-SDN (complex)", lambda: FactorizedSpectralDensityNetwork(
-            input_dim=1, hidden_dims=[128, 128], rank=8, n_features=256,
-            omega_max=10.0, enforce_symmetry=False, spectral_real=False, prior_variance=1.0
-        )))
+        methods.append(
+            MethodSpec(
+                "F-SDN (complex)",
+                lambda: FactorizedSpectralDensityNetwork(
+                    input_dim=1,
+                    hidden_dims=[128, 128],
+                    rank=8,
+                    n_features=256,
+                    omega_max=10.0,
+                    enforce_symmetry=False,
+                    spectral_real=False,
+                    prior_variance=1.0,
+                ),
+            )
+        )
     return methods
 
 
@@ -70,8 +99,7 @@ def make_hmk():
     d = 1
     eta = torch.tensor([[1.0]])
     frequencies = torch.cat([eta, -eta], dim=0)
-    B = torch.tensor(
-        [[2.0 + 0.0j, 0.0 + 0.5j], [0.0 - 0.5j, 2.0 + 0.0j]])
+    B = torch.tensor([[2.0 + 0.0j, 0.0 + 0.5j], [0.0 - 0.5j, 2.0 + 0.0j]])
     sigma1 = torch.eye(d) * (1.0 / (math.pi**2))
     sigma2 = torch.eye(d) * (1.0 / (2.0 * math.pi) ** 2)
     return HarmonizableMixtureKernel(
@@ -105,8 +133,11 @@ def _evaluate_one_method(
         model.fit(X_train, y_train, epochs=epochs, lr=0.01, verbose=False)
 
         # K-error: relative Frobenius norm of the kernel matrix at test points.
-        K_pred = model.compute_covariance(X_test, X_test) if isinstance(model, StandardGP) \
+        K_pred = (
+            model.compute_covariance(X_test, X_test)
+            if isinstance(model, StandardGP)
             else model.compute_covariance(X_test)
+        )
         out["k_error"] = float(
             (torch.norm(K_pred - K_true_test) / torch.norm(K_true_test)).item()
         )
@@ -150,13 +181,21 @@ def run_single_comparison(
 
     K_true_test = K_joint[n_train:, n_train:]
 
-    oracle_post = oracle_posterior(kernel_fn, X_train, y_train, X_test, noise_var=noise_var)
+    oracle_post = oracle_posterior(
+        kernel_fn, X_train, y_train, X_test, noise_var=noise_var
+    )
 
     rows = []
     for spec in make_methods(include_complex=include_complex):
         row = _evaluate_one_method(
-            spec, X_train, y_train, X_test, y_test, K_true_test,
-            oracle_post, epochs,
+            spec,
+            X_train,
+            y_train,
+            X_test,
+            y_test,
+            K_true_test,
+            oracle_post,
+            epochs,
         )
         row["seed"] = seed
         rows.append(row)
@@ -177,7 +216,12 @@ def run_benchmark(
     for i, seed in enumerate(seeds):
         print(f"Seed {i+1}/{len(seeds)} (seed={seed})")
         rows = run_single_comparison(
-            kernel_fn, seed=seed, x_lo=x_lo, x_hi=x_hi, noise_var=noise_var, include_complex=include_complex,
+            kernel_fn,
+            seed=seed,
+            x_lo=x_lo,
+            x_hi=x_hi,
+            noise_var=noise_var,
+            include_complex=include_complex,
         )
         all_rows.extend(rows)
     return pd.DataFrame(all_rows)
@@ -211,13 +255,21 @@ def main():
     lsk = LocalStationaryKernel(a=0.5)
     # Fixed seed range for reproducibility.
     df_lsk = run_benchmark(
-        lsk.kernel, "Silverman Locally Stationary",
-        seeds=range(42, 42+10), x_lo=-5.0, x_hi=5.0, noise_var=1e-3,
+        lsk.kernel,
+        "Silverman Locally Stationary",
+        seeds=range(42, 42 + 10),
+        x_lo=-5.0,
+        x_hi=5.0,
+        noise_var=1e-3,
     )
 
     df_hmk = run_benchmark(
-        hmk_real_kernel, "Harmonizable Mixture Kernel",
-        seeds=range(42, 42+10), x_lo=-2.0, x_hi=2.0, noise_var=1e-2,
+        hmk_real_kernel,
+        "Harmonizable Mixture Kernel",
+        seeds=range(42, 42 + 10),
+        x_lo=-2.0,
+        x_hi=2.0,
+        noise_var=1e-2,
     )
 
     summary_lsk = summarise(df_lsk)
@@ -225,20 +277,13 @@ def main():
 
     # Save per-seed and summary results
     pd.concat(
-            [
-                df_lsk.assign(dataset="Silverman LS"),
-                df_hmk.assign(dataset="HMK")
-                ],
-            ignore_index=True,
-        ).to_csv(DATA_DIR / "benchmark_per_seed.csv", index=False)
+        [df_lsk.assign(dataset="Silverman LS"), df_hmk.assign(dataset="HMK")],
+        ignore_index=True,
+    ).to_csv(DATA_DIR / "benchmark_per_seed.csv", index=False)
     pd.concat(
-            [
-                summary_lsk.assign(dataset="Silverman LS"),
-                summary_hmk.assign(dataset="HMK")
-                ],
-            ignore_index=True,
-        ).to_csv(DATA_DIR / "benchmark_summary.csv", index=False)
-
+        [summary_lsk.assign(dataset="Silverman LS"), summary_hmk.assign(dataset="HMK")],
+        ignore_index=True,
+    ).to_csv(DATA_DIR / "benchmark_summary.csv", index=False)
 
     return df_lsk, df_hmk, summary_lsk, summary_hmk
 

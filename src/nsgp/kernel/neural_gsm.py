@@ -21,7 +21,9 @@ class GaussianPriorLoss(AddedLossTerm):
         self.prior_variance = prior_variance
 
     def loss(self):
-        weights = torch.cat([p.view(-1) for name, p in self.parameters() if "weight" in name])
+        weights = torch.cat(
+            [p.view(-1) for name, p in self.parameters() if "weight" in name]
+        )
         return -0.5 * weights.norm().pow(2) / self.prior_variance
 
 
@@ -53,10 +55,7 @@ class GSMParameterNet(nn.Module):
         self.backbone = nn.Sequential(*layers)
 
         # Separate scalar final layers per component (paper: shared except final layer)
-        self.heads = nn.ModuleList([
-            nn.Linear(prev, 1)
-            for _ in range(n_components)
-        ])
+        self.heads = nn.ModuleList([nn.Linear(prev, 1) for _ in range(n_components)])
 
         self._init_weights()
 
@@ -86,7 +85,9 @@ class GSMParameterNet(nn.Module):
         """
         h = self.backbone(x)
         # Each head outputs (... x N x 1), cat along last dim -> (... x N x Q)
-        return torch.cat([nn.functional.softplus(head(h)) for head in self.heads], dim=-1)
+        return torch.cat(
+            [nn.functional.softplus(head(h)) for head in self.heads], dim=-1
+        )
 
 
 class NeuralGSMKernel(Kernel):
@@ -128,7 +129,9 @@ class NeuralGSMKernel(Kernel):
         # ell(x) -> Q scalars (lengthscales)
         self.len_net = GSMParameterNet(input_dim, n_components, hidden_dims=hidden_dims)
         # mu(x) -> Q scalars (frequencies)
-        self.freq_net = GSMParameterNet(input_dim, n_components, hidden_dims=hidden_dims)
+        self.freq_net = GSMParameterNet(
+            input_dim, n_components, hidden_dims=hidden_dims
+        )
 
         # Gaussian prior on NN weights (matches GPflow's Gaussian(0, 1) prior)
         self.register_added_loss_term("nn_weight_prior")
@@ -200,7 +203,6 @@ class NeuralGSMKernel(Kernel):
                     cos_term = torch.cos(2.0 * math.pi * (phase1 - phase2))
 
             else:
-
                 S = l1.pow(2) + l2.pow(2).transpose(-2, -1)
                 prod = l1 * l2.transpose(-2, -1)
                 WW = w1 @ w2.transpose(-2, -1)
@@ -210,9 +212,13 @@ class NeuralGSMKernel(Kernel):
 
                 phase1 = (mu1 * x1).sum(dim=-1, keepdim=True)  # (... x N x 1)
                 phase2 = (mu2 * x2).sum(dim=-1, keepdim=True)  # (... x M x 1)
-                cos_term = torch.cos(2.0 * math.pi * self.covar_dist(
-                    phase1, phase2, square_dist=False, diag=False, **params
-                ))
+                cos_term = torch.cos(
+                    2.0
+                    * math.pi
+                    * self.covar_dist(
+                        phase1, phase2, square_dist=False, diag=False, **params
+                    )
+                )
 
             Kq = WW * gibbs * cos_term
 

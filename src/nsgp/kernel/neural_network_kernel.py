@@ -22,7 +22,9 @@ class NeuralNetworkKernel(Kernel):
     is_stationary = False
     has_lengthscale = False
 
-    def __init__(self, aug_dim, variance_prior=None, variance_constraint=None, **kwargs):
+    def __init__(
+        self, aug_dim, variance_prior=None, variance_constraint=None, **kwargs
+    ):
         super().__init__(**kwargs)
         self.aug_dim = aug_dim
 
