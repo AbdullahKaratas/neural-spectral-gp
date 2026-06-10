@@ -96,7 +96,7 @@ class RegularNonstationaryFeatures:
         x2: torch.Tensor,
         spacing: float = 1.0,
     ):
-        x1_eq_x2 = x1 is x2
+        x1_eq_x2 = torch.equal(x1, x2)
         kernel_root, matrix_root, omega = self.lowrank(
             x1=x1, spacing=spacing, return_extras=True
         )
