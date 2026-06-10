@@ -83,16 +83,29 @@ test_x = torch.tensor(
 test_y = torch.tensor(test_y.flatten(), dtype=torch.get_default_dtype())
 
 
+def _metrics(model, x, y):
+    mvn = model._full_pred_dist(x, predictive_dist=True)
+    return {
+        "nlpd": gpytorch.metrics.negative_log_predictive_density(mvn, y).item(),
+        "mae": gpytorch.metrics.mean_absolute_error(mvn, y).item(),
+        "mse": gpytorch.metrics.mean_squared_error(mvn, y).item(),
+    }
+
+
 def gap_metrics(model, test_y):
     with torch.no_grad():
-        mvn = model._full_pred_dist(test_x, predictive_dist=True)
-        return {
-            "nlpd": gpytorch.metrics.negative_log_predictive_density(
-                mvn, test_y
-            ).item(),
-            "mae": gpytorch.metrics.mean_absolute_error(mvn, test_y).item(),
-            "mse": gpytorch.metrics.mean_squared_error(mvn, test_y).item(),
-        }
+        return _metrics(model, test_x, test_y)
+
+
+def per_interval_metrics(model):
+    """Metrics for each gap interval separately."""
+    years = to_year(test_x.squeeze().numpy())
+    out = {}
+    with torch.no_grad():
+        for low, up in intervals:
+            mask = torch.from_numpy((years > low) & (years < up))
+            out[(low, up)] = _metrics(model, test_x[mask], test_y[mask])
+    return out
 
 
 def plot(model, ax=None):
@@ -185,5 +198,17 @@ fig.tight_layout()
 out = DATA_DIR / "solar_fit.png"
 # fig.savefig(out, dpi=100)
 
-print(results)
+# Save gap metrics
+models = [("RBF", gp), ("NNK", nnk), ("F-SDN", fsdn)]
+
+gap_rows = [{"model": name, **results[name]} for name, _ in models]
+pd.DataFrame(gap_rows).to_csv(DATA_DIR / "solar_metrics.csv", index=False)
+# Save metrics per-interval
+interval_rows = []
+for name, mdl in models:
+    pim = per_interval_metrics(mdl)
+    for low, up in intervals:
+        interval_rows.append({"model": name, "interval": f"{low}-{up}", **pim[low, up]})
+pd.DataFrame(interval_rows).to_csv(DATA_DIR / "solar_per_interval.csv", index=False)
+
 plt.show()
