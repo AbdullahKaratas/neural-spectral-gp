@@ -1,5 +1,6 @@
 import math
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable, List
 
 import numpy as np
@@ -8,13 +9,19 @@ import torch
 from scipy import stats
 
 from nsgp.kernel import HarmonizableMixtureKernel, LocalStationaryKernel
-from gpytorch.metrics import negative_log_predictive_density
+from gpytorch.metrics import (
+    negative_log_predictive_density,
+    mean_absolute_error,
+    mean_squared_error,
+)
+from gpytorch.kernels import ScaleKernel
 from nsgp.metrics import (
     kl_posterior,
     marginal_log_likelihood,
     noise_variance,
     oracle_posterior,
 )
+from nsgp.kernel import NeuralNetworkKernel
 from nsgp.models import (
     DKLGP,
     FactorizedSpectralDensityNetwork,
@@ -22,8 +29,13 @@ from nsgp.models import (
     StandardGP,
 )
 
+torch.set_default_dtype(torch.float64)
 
-METRIC_KEYS = ["k_error", "nlpd", "kl", "mll", "noise_var"]
+
+DATA_DIR = Path(__file__).parent / "data"
+DATA_DIR.mkdir(exist_ok=True)
+
+METRIC_KEYS = ["k_error", "nlpd", "mae", "mse", "kl", "mll", "noise_var"]
 
 
 @dataclass
@@ -36,10 +48,11 @@ class MethodSpec:
 def make_methods(include_complex: bool = True) -> List[MethodSpec]:
     methods = [
         MethodSpec("RBF", lambda: StandardGP()),
+        MethodSpec("NNK", lambda: StandardGP(ScaleKernel(NeuralNetworkKernel(aug_dim=2)))),
         MethodSpec("Neural-GSM", lambda: NeuralGSMGP(
-            input_dim=1, n_components=2, hidden_dims=[32, 32], prior_variance=1.0,
+            input_dim=1, n_components=2, hidden_dims=[128, 128], prior_variance=1.0,
         )),
-        MethodSpec("DKL", lambda: DKLGP(input_dim=1)),
+        MethodSpec("DKL", lambda: DKLGP(input_dim=1, hidden_dims=[128, 128])),
         MethodSpec("F-SDN (real)", lambda: FactorizedSpectralDensityNetwork(
             input_dim=1, hidden_dims=[128, 128], rank=8, n_features=256,
             omega_max=10.0, enforce_symmetry=False, spectral_real=True, prior_variance=1.0
@@ -85,7 +98,7 @@ def _evaluate_one_method(
     oracle_post,
     epochs: int,
 ) -> dict:
-    """Fit ``spec.factory()`` and compute the five metrics. NaN on any failure."""
+    """Fit ``spec.factory()`` and compute all METRIC_KEYS. NaN on any failure."""
     out = {"method": spec.label, **{k: math.nan for k in METRIC_KEYS}}
     try:
         model = spec.factory()
@@ -100,10 +113,12 @@ def _evaluate_one_method(
 
         pred_dist = model._full_pred_dist(X_test)
         out["nlpd"] = float(negative_log_predictive_density(pred_dist, y_test).item())
+        out["mae"] = float(mean_absolute_error(pred_dist, y_test).item())
+        out["mse"] = float(mean_squared_error(pred_dist, y_test).item())
         out["kl"] = float(kl_posterior(pred_dist, oracle_post).item())
         out["mll"] = marginal_log_likelihood(model)
         out["noise_var"] = noise_variance(model)
-    except Exception as exc:  # noqa: BLE001 — single seeds are allowed to fail
+    except Exception as exc:  # single seeds are allowed to fail
         out["error_msg"] = f"{type(exc).__name__}: {exc}"
     return out
 
@@ -111,9 +126,9 @@ def _evaluate_one_method(
 def run_single_comparison(
     kernel_fn,
     seed: int,
-    n_train: int = 50,
+    n_train: int = 35,
     n_test: int = 50,
-    epochs: int = 4000,
+    epochs: int = 2000,
     noise_var: float = 1e-4,
     x_lo: float = -5.0,
     x_hi: float = 5.0,
@@ -165,14 +180,6 @@ def run_benchmark(
             kernel_fn, seed=seed, x_lo=x_lo, x_hi=x_hi, noise_var=noise_var, include_complex=include_complex,
         )
         all_rows.extend(rows)
-        for r in rows:
-            def _fmt(v, fmt): return "NaN" if math.isnan(v) else fmt.format(v)
-            kerr = _fmt(r["k_error"], "{:.2%}")
-            nlpd = _fmt(r["nlpd"], "{:.3f}")
-            kl   = _fmt(r["kl"],    "{:.3f}")
-            mll  = _fmt(r["mll"],   "{:.3f}")
-            nv   = _fmt(r["noise_var"], "{:.2e}")
-            print(f"  {r['method']:<16} K-err={kerr:>10}  NLPD={nlpd:>8}  KL={kl:>8}  MLL={mll:>8}  noise={nv:>10}")
     return pd.DataFrame(all_rows)
 
 
@@ -200,54 +207,38 @@ def summarise(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def render_table(summary: pd.DataFrame, dataset_name: str) -> str:
-    """Markdown table: methods x metrics with mean +- CI and n_ok/n_total."""
-    header_metrics = [
-        ("k_error",  "K-error %",       lambda v: f"{v*100:.1f}",  lambda c: f"±{c*100:.1f}"),
-        ("nlpd",     "NLPD",            lambda v: f"{v:.2f}",      lambda c: f"±{c:.2f}"),
-        ("kl",       "KL(fit‖oracle)",  lambda v: f"{v:.2f}",      lambda c: f"±{c:.2f}"),
-        ("mll",      "MLL",             lambda v: f"{v:.1f}",      lambda c: f"±{c:.1f}"),
-        ("noise_var","noise_var",       lambda v: f"{v:.2e}",      lambda c: f"±{c:.0e}"),
-    ]
-    header = "| Method | n | " + " | ".join(h[1] for h in header_metrics) + " |"
-    sep = "|" + "---|" * (2 + len(header_metrics))
-    lines = [f"### {dataset_name}", "", header, sep]
-    for _, row in summary.iterrows():
-        cells = [row["method"]]
-        n_ok_min = min(int(row[f"{k}_n_ok"]) for k, *_ in header_metrics)
-        cells.append(f"{n_ok_min}/{int(row['n_total'])}")
-        for key, _, fmt_v, fmt_c in header_metrics:
-            mean = row[f"{key}_mean"]
-            ci = row[f"{key}_ci95"]
-            if pd.isna(mean):
-                cells.append("—")
-            elif pd.isna(ci):
-                cells.append(fmt_v(mean))
-            else:
-                cells.append(f"{fmt_v(mean)} {fmt_c(ci)}")
-        lines.append("| " + " | ".join(cells) + " |")
-    return "\n".join(lines)
-
-
 def main():
     lsk = LocalStationaryKernel(a=0.5)
-    # Specific seeds creates meaning full data / no constant data
+    # Fixed seed range for reproducibility.
     df_lsk = run_benchmark(
         lsk.kernel, "Silverman Locally Stationary",
-        seeds=(42, 44, 45, 46, 47), x_lo=-5.0, x_hi=5.0, noise_var=1e-3, include_complex=False,
+        seeds=range(42, 42+10), x_lo=-5.0, x_hi=5.0, noise_var=1e-3,
     )
 
-    # Specific seeds creates meaning full data / no constant data
     df_hmk = run_benchmark(
         hmk_real_kernel, "Harmonizable Mixture Kernel",
-        seeds=(42, 43, 45, 46, 47), x_lo=-2.0, x_hi=2.0, noise_var=1e-2,
+        seeds=range(42, 42+10), x_lo=-2.0, x_hi=2.0, noise_var=1e-2,
     )
 
     summary_lsk = summarise(df_lsk)
     summary_hmk = summarise(df_hmk)
 
-    print("\n" + render_table(summary_lsk, "Silverman LS"))
-    print("\n" + render_table(summary_hmk, "HMK"))
+    # Save per-seed and summary results
+    pd.concat(
+            [
+                df_lsk.assign(dataset="Silverman LS"),
+                df_hmk.assign(dataset="HMK")
+                ],
+            ignore_index=True,
+        ).to_csv(DATA_DIR / "benchmark_per_seed.csv", index=False)
+    pd.concat(
+            [
+                summary_lsk.assign(dataset="Silverman LS"),
+                summary_hmk.assign(dataset="HMK")
+                ],
+            ignore_index=True,
+        ).to_csv(DATA_DIR / "benchmark_summary.csv", index=False)
+
 
     return df_lsk, df_hmk, summary_lsk, summary_hmk
 
