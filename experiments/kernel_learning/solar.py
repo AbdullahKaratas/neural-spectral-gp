@@ -26,6 +26,7 @@ from matplotlib import pyplot as plt
 import gpytorch
 
 from nsgp.models import FactorizedSpectralDensityNetwork, StandardGP
+from nsgp.kernel import NeuralNetworkKernel
 
 torch.set_default_dtype(torch.float64)
 torch.manual_seed(67)
@@ -132,18 +133,24 @@ def plot(model, ax=None):
     ax.legend(loc="upper left")
 
 
-fig, axes = plt.subplots(3, 1, figsize=(6, 12), sharex=True)
+fig, axes = plt.subplots(3, 1, figsize=(10, 9), sharex=True)
 results = {}
 
 # (a) RBF
 gp = StandardGP()
+gp.likelihood.noise = 1.0
 gp.fit(train_x, train_y, epochs=2000, lr=0.01, verbose=True)
 plot(gp, axes[0])
 axes[0].set_title("(a) RBF")
 results["RBF"] = gap_metrics(gp, test_y)
 
 # (b) Neural Network Kernel
-#
+nnk = StandardGP(kernel=gpytorch.kernels.ScaleKernel(NeuralNetworkKernel(aug_dim=2)))
+nnk.likelihood.noise = 1.0
+nnk.fit(train_x, train_y, epochs=2000, lr=0.01, verbose=True)
+plot(nnk, axes[1])
+axes[1].set_title("(b) NNK")
+results["NNK"] = gap_metrics(nnk, test_y)
 
 # (c) F-SDN (ours)
 omega_max = 32.0
