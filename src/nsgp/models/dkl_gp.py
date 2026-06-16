@@ -26,7 +26,7 @@ class ExactDKLGP(gpytorch.models.ExactGP):
 
 class DKLGP:
     """
-    Exact GP with stationary neural kernel (Wilson et al. 2015).
+    Exact GP with stationary neural kernel (Wilson et al. 2016).
     Fully connected network defaults to paper architecture
 
     Parameters
