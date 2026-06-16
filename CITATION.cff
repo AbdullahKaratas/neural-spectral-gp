@@ -13,8 +13,8 @@ authors:
   - family-names: Seewig
     given-names: Joerg
     orcid: https://orcid.org/0000-0002-1420-1597
-repository-code: "https://github.com/mts-public/neural-spectral-gp"
-url: "https://github.com/mts-public/neural-spectral-gp"
+repository-code: "https://github.com/anjawa/neural-spectral-gp"
+url: "https://github.com/anjawa/neural-spectral-gp"
 license: MIT
 keywords:
   - gaussian-processes
