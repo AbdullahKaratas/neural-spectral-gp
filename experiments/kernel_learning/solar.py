@@ -108,7 +108,7 @@ def per_interval_metrics(model):
     return out
 
 
-def plot(model, ax=None):
+def plot(model, ax=None, name=None):
     if ax is None:
         _, ax = plt.subplots(figsize=(8, 3))
     xgrid = torch.linspace(-5.0, 5.0, 300).unsqueeze(-1)
@@ -146,6 +146,29 @@ def plot(model, ax=None):
     ax.set_xlim(YEAR_MIN, YEAR_MAX)
     ax.legend(loc="upper left")
 
+    if name is not None:
+        data = {
+            "year": years,
+            "mean": mu,
+            "upper": mu + 2.0 * sd,
+            "lower": mu - 2.0 * sd,
+        }
+        pd.DataFrame(data).to_csv(DATA_DIR / f"solar_{name}.csv", index=False)
+
+
+# Save train/test data
+pd.DataFrame(
+    {
+        "year": to_year(train_x.numpy()).ravel(),
+        "y": train_y.numpy().ravel(),
+    }
+).to_csv(DATA_DIR / "solar_train.csv", index=False)
+pd.DataFrame(
+    {
+        "year": to_year(test_x.numpy()).ravel(),
+        "y": test_y.numpy().ravel(),
+    }
+).to_csv(DATA_DIR / "solar_test.csv", index=False)
 
 fig, axes = plt.subplots(3, 1, figsize=(10, 9), sharex=True)
 results = {}
@@ -154,7 +177,7 @@ results = {}
 gp = StandardGP()
 gp.likelihood.noise = 1.0
 gp.fit(train_x, train_y, epochs=2000, lr=0.01, verbose=True)
-plot(gp, axes[0])
+plot(gp, axes[0], "rbf")
 axes[0].set_title("(a) RBF")
 results["RBF"] = gap_metrics(gp, test_y)
 
@@ -162,7 +185,7 @@ results["RBF"] = gap_metrics(gp, test_y)
 nnk = StandardGP(kernel=gpytorch.kernels.ScaleKernel(NeuralNetworkKernel(aug_dim=2)))
 nnk.likelihood.noise = 1.0
 nnk.fit(train_x, train_y, epochs=2000, lr=0.01, verbose=True)
-plot(nnk, axes[1])
+plot(nnk, axes[1], "nnk")
 axes[1].set_title("(b) NNK")
 results["NNK"] = gap_metrics(nnk, test_y)
 
@@ -189,7 +212,7 @@ fsdn = FactorizedSpectralDensityNetwork(
 with torch.no_grad():
     fsdn.log_noise_var.data = torch.tensor(math.log(1**2))
 fsdn.fit(train_x, train_y, epochs=2000, lr=0.01, verbose=True)
-plot(fsdn, axes[2])
+plot(fsdn, axes[2], "fsdn")
 axes[2].set_title("(c) F-SDN (ours)")
 results["F-SDN"] = gap_metrics(fsdn, test_y)
 
