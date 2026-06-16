@@ -27,18 +27,21 @@ pre-commit install
 ```
 neural-spectral-gp/
 ├── src/nsgp/
-│   ├── kernel/                 # Kernel functions (Silverman, HMK, Neural-GSM, NN Kernel)
+│   ├── kernel/                 # Kernel functions (Silverman, HMK, Neural-GSM, NNK, DKL)
 │   │   ├── local_stationary.py
 │   │   ├── hmk.py
 │   │   ├── neural_gsm.py
-│   │   └── neural_network_kernel.py
+│   │   ├── neural_network_kernel.py
+│   │   └── deep_kernel.py
 │   ├── lowrank/                # Fourier feature approximations
 │   │   ├── regular_nff.py      # Regular Fourier Features (Ours)
 │   │   └── random_nff.py       # Random Fourier Feature
 │   ├── models/                 # GP models
 │   │   ├── sdn_factorized.py   # Factorized Spectral Density Network (Ours)
 │   │   ├── standard_gp.py      # Exact GP Model with configurable kernel
-│   │   └── neural_gsm_gp.py    # Exact GP Model with Neural-GSM
+│   │   ├── neural_gsm_gp.py    # Exact GP Model with Neural-GSM
+│   │   └── dkl_gp.py           # DKL GP
+│   ├── metrics.py
 │   └── utils.py
 ├── experiments/
 │   ├── low_rank/         # Kernel approximation experiments
@@ -53,7 +56,7 @@ neural-spectral-gp/
 
 Low-rank kernel approximation:
 ```bash
-python experiments/low_rank/local_stationary_example.py # Silverman
+python experiments/low_rank/local_stationary_example.py # LS
 python experiments/low_rank/hmk_example.py              # HMK
 python experiments/low_rank/ablation_studies.py         # Ablation Studies
 python experiments/low_rank/regular_vs_random.py        # Regular vs Random Fourier
@@ -61,9 +64,8 @@ python experiments/low_rank/regular_vs_random.py        # Regular vs Random Four
 
 Kernel learning:
 ```bash
-python experiments/kernel_learning/compare_local_stationary.py # FSDN vs RBF (posterior predictions on Silverman)
-python experiments/kernel_learning/fsdn_vs_rbf.py              # FSDN vs RBF (quantitative comparison on Silverman)
-python experiments/kernel_learning/solar.py                    # FSDN vs RBF vs NN kernel on the solar dataset
+python experiments/kernel_learning/solar.py                    # FSDN vs RBF vs NNK kernel on the solar dataset
+python experiments/kernel_learning/fsdn_vs_baselines.py        # FSDN vs RBF, NNK, Neural-GSM, DKL on synthetic data (LS + HMK)
 ```
 
 Tests:
