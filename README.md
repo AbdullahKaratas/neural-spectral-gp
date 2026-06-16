@@ -27,7 +27,7 @@ pre-commit install
 ```
 neural-spectral-gp/
 ├── src/nsgp/
-│   ├── kernel/                 # Kernel functions (Silverman, HMK, Neural-GSM, NNK, DKL)
+│   ├── kernel/                 # Kernel functions (LS, HMK, Neural-GSM, NNK, DKL)
 │   │   ├── local_stationary.py
 │   │   ├── hmk.py
 │   │   ├── neural_gsm.py
@@ -64,8 +64,8 @@ python experiments/low_rank/regular_vs_random.py        # Regular vs Random Four
 
 Kernel learning:
 ```bash
-python experiments/kernel_learning/solar.py                    # FSDN vs RBF vs NNK kernel on the solar dataset
-python experiments/kernel_learning/fsdn_vs_baselines.py        # FSDN vs RBF, NNK, Neural-GSM, DKL on synthetic data (LS + HMK)
+python experiments/kernel_learning/solar.py              # FSDN vs RBF vs NNK kernel on the solar dataset
+python experiments/kernel_learning/fsdn_vs_baselines.py  # FSDN vs RBF, NNK, Neural-GSM, DKL on synthetic data (LS + HMK)
 ```
 
 Tests:
