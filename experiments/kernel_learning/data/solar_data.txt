@@ -2,7 +2,7 @@
 # citation:
 # Lean, J.. 2004.
 # Solar Irradiance Reconstruction.
-# IGBP PAGES/World Data Center for Paleoclimatology.
+# IGBP PAGES/World Data Center for Paleoclimatology
 # Data Contribution Series # 2004-035.
 # NOAA/NGDC Paleoclimatology Program, Boulder CO, USA.
 #
