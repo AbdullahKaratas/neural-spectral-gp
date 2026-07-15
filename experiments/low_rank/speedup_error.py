@@ -19,7 +19,7 @@ from nsgp.lowrank import RegularNonstationaryFeatures
 DATA_DIR = Path(__file__).parent / "data"
 DATA_DIR.mkdir(exist_ok=True)
 
-REPEATS = 10
+REPEATS = 20
 WARMUP = 1
 SIGMA2 = 0.1
 N_GRID = [2000, 4000, 6000, 8000]
