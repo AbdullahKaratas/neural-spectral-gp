@@ -60,6 +60,7 @@ python experiments/low_rank/local_stationary_example.py # LS
 python experiments/low_rank/hmk_example.py              # HMK
 python experiments/low_rank/ablation_studies.py         # Ablation Studies
 python experiments/low_rank/regular_vs_random.py        # Regular vs Random Fourier
+python experiments/low_rank/speedup_error.py            # Speed-up against Cholesky
 ```
 
 Kernel learning:
