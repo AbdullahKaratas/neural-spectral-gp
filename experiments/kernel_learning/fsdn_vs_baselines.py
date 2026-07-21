@@ -257,7 +257,7 @@ def main():
     df_lsk = run_benchmark(
         lsk.kernel,
         "Silverman Locally Stationary",
-        seeds=range(42, 42 + 10),
+        seeds=range(42, 42 + 20),
         x_lo=-5.0,
         x_hi=5.0,
         noise_var=1e-3,
@@ -266,7 +266,7 @@ def main():
     df_hmk = run_benchmark(
         hmk_real_kernel,
         "Harmonizable Mixture Kernel",
-        seeds=range(42, 42 + 10),
+        seeds=range(42, 42 + 20),
         x_lo=-2.0,
         x_hi=2.0,
         noise_var=1e-2,
